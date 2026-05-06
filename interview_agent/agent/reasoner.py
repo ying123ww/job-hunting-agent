@@ -61,14 +61,23 @@ class AgentReasoner:
         *,
         message: str,
         intent: Intent,
+        current_jd_id: str | None = None,
+        memory_snapshot: MemorySnapshot | None = None,
         previous_results: list[ToolResult] | None = None,
     ) -> list[ToolCall]:
         results = previous_results or []
         executed = {result.tool_name for result in results}
+        current_goal = memory_snapshot.working_memory.current_goal if memory_snapshot is not None else ""
+        top_dimension = (
+            memory_snapshot.working_memory.latest_top_gap_dimensions[0]
+            if memory_snapshot is not None and memory_snapshot.working_memory.latest_top_gap_dimensions
+            else None
+        )
+        recall_query = self._build_recall_query(message=message, current_goal=current_goal)
 
         if intent == "plan":
             if "recall_memory" not in executed:
-                return [ToolCall(tool_name="recall_memory", arguments={"query": message})]
+                return [ToolCall(tool_name="recall_memory", arguments={"query": recall_query})]
             if "analyze_gaps" not in executed:
                 return [ToolCall(tool_name="analyze_gaps", arguments={"limit": 3})]
             if "plan_today" not in executed:
@@ -77,7 +86,7 @@ class AgentReasoner:
 
         if intent == "diagnosis":
             if "recall_memory" not in executed:
-                return [ToolCall(tool_name="recall_memory", arguments={"query": message})]
+                return [ToolCall(tool_name="recall_memory", arguments={"query": recall_query})]
             if "analyze_gaps" not in executed:
                 return [ToolCall(tool_name="analyze_gaps", arguments={"limit": 3})]
             gap_result = self._find_result(results, "analyze_gaps")
@@ -87,7 +96,15 @@ class AgentReasoner:
                 and not gap_result.payload.get("gaps")
                 and "search_evidence" not in executed
             ):
-                return [ToolCall(tool_name="search_evidence", arguments={"query": message})]
+                return [
+                    ToolCall(
+                        tool_name="search_evidence",
+                        arguments={
+                            "query": self._build_search_query(message=message, current_goal=current_goal),
+                            "dimension": top_dimension or "",
+                        },
+                    )
+                ]
             return []
 
         if intent == "sync":
@@ -98,14 +115,23 @@ class AgentReasoner:
             return []
 
         if "recall_memory" not in executed:
-            return [ToolCall(tool_name="recall_memory", arguments={"query": message})]
+            return [ToolCall(tool_name="recall_memory", arguments={"query": recall_query})]
         if "search_evidence" not in executed:
             recall_result = self._find_result(results, "recall_memory")
             recall_hits = list((recall_result.payload.get("hits") if recall_result else []) or [])
-            query = message
+            query = self._build_search_query(message=message, current_goal=current_goal)
             if recall_hits:
                 query = f"{message}\n{recall_hits[0].summary}"
-            return [ToolCall(tool_name="search_evidence", arguments={"query": query})]
+            return [
+                ToolCall(
+                    tool_name="search_evidence",
+                    arguments={
+                        "query": query,
+                        "dimension": top_dimension or "",
+                        "source_types": self._qa_source_hints(message=message, current_jd_id=current_jd_id),
+                    },
+                )
+            ]
         return []
 
     def reflect_tool_results(
@@ -113,9 +139,17 @@ class AgentReasoner:
         *,
         message: str,
         intent: Intent,
+        current_jd_id: str | None = None,
+        memory_snapshot: MemorySnapshot | None = None,
         tool_results: list[ToolResult],
     ) -> list[ToolCall]:
-        return self.plan_tool_calls(message=message, intent=intent, previous_results=tool_results)
+        return self.plan_tool_calls(
+            message=message,
+            intent=intent,
+            current_jd_id=current_jd_id,
+            memory_snapshot=memory_snapshot,
+            previous_results=tool_results,
+        )
 
     def finalize_turn(
         self,
@@ -279,3 +313,21 @@ class AgentReasoner:
             if result.tool_name == tool_name:
                 return result
         return None
+
+    def _build_recall_query(self, *, message: str, current_goal: str) -> str:
+        if current_goal and current_goal not in message:
+            return f"{message}\n{current_goal}"
+        return message
+
+    def _build_search_query(self, *, message: str, current_goal: str) -> str:
+        if current_goal and current_goal not in message:
+            return f"{message}\n当前目标：{current_goal}"
+        return message
+
+    def _qa_source_hints(self, *, message: str, current_jd_id: str | None) -> list[str]:
+        lowered = message.lower()
+        if any(token in lowered for token in ("简历", "resume", "bullet", "项目")):
+            return ["resume", "jd"] if current_jd_id else ["resume"]
+        if any(token in lowered for token in ("岗位", "jd", "匹配")):
+            return ["jd", "resume"]
+        return ["resume", "jd", "question", "gap_record"]

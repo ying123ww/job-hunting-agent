@@ -578,6 +578,8 @@ class InterviewAgentRuntime:
                 user_id=before_reasoning.user_id,
                 current_jd_id=before_reasoning.current_jd_id,
                 message=before_reasoning.message,
+                intent=before_reasoning.intent,
+                memory_snapshot=before_reasoning.memory_snapshot,
             )
             try:
                 tool = self.tool_registry.get(tool_call.tool_name)
@@ -625,13 +627,22 @@ class InterviewAgentRuntime:
             planned = self.reasoner.plan_tool_calls(
                 message=before_reasoning.message,
                 intent=before_reasoning.intent,
+                current_jd_id=before_reasoning.current_jd_id,
+                memory_snapshot=before_reasoning.memory_snapshot,
                 previous_results=[],
             )
         except TypeError:
-            planned = self.reasoner.plan_tool_calls(
-                message=before_reasoning.message,
-                intent=before_reasoning.intent,
-            )
+            try:
+                planned = self.reasoner.plan_tool_calls(
+                    message=before_reasoning.message,
+                    intent=before_reasoning.intent,
+                    previous_results=[],
+                )
+            except TypeError:
+                planned = self.reasoner.plan_tool_calls(
+                    message=before_reasoning.message,
+                    intent=before_reasoning.intent,
+                )
         return list(planned)
 
     def _reflect_tool_calls(
@@ -642,23 +653,45 @@ class InterviewAgentRuntime:
     ) -> list[ToolCall]:
         reflect = getattr(self.reasoner, "reflect_tool_results", None)
         if reflect is not None:
-            return list(
-                reflect(
-                    message=before_reasoning.message,
-                    intent=before_reasoning.intent,
-                    tool_results=list(results),
+            try:
+                return list(
+                    reflect(
+                        message=before_reasoning.message,
+                        intent=before_reasoning.intent,
+                        current_jd_id=before_reasoning.current_jd_id,
+                        memory_snapshot=before_reasoning.memory_snapshot,
+                        tool_results=list(results),
+                    )
                 )
-            )
+            except TypeError:
+                return list(
+                    reflect(
+                        message=before_reasoning.message,
+                        intent=before_reasoning.intent,
+                        tool_results=list(results),
+                    )
+                )
         try:
             return list(
                 self.reasoner.plan_tool_calls(
                     message=before_reasoning.message,
                     intent=before_reasoning.intent,
+                    current_jd_id=before_reasoning.current_jd_id,
+                    memory_snapshot=before_reasoning.memory_snapshot,
                     previous_results=list(results),
                 )
             )
         except TypeError:
-            return []
+            try:
+                return list(
+                    self.reasoner.plan_tool_calls(
+                        message=before_reasoning.message,
+                        intent=before_reasoning.intent,
+                        previous_results=list(results),
+                    )
+                )
+            except TypeError:
+                return []
 
     def _filter_new_tool_calls(self, calls: list[ToolCall], results: list[ToolResult]) -> list[ToolCall]:
         executed = {result.tool_name for result in results}

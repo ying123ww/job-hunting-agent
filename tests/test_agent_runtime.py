@@ -16,6 +16,7 @@ from interview_agent.agent.reasoner import AgentTurnDecision
 from interview_agent.agent.runtime import AgentTurnRequest, InterviewAgentRuntime
 from interview_agent.agent.tools import ToolCall, ToolRegistry, ToolResult
 from interview_agent.app.config import get_settings
+from interview_agent.retrieval.service import RetrievalService
 from interview_agent.core.container import AppContainer
 
 
@@ -280,6 +281,60 @@ def test_tool_loop_can_replan_after_each_step(tmp_path) -> None:
 
     assert result.reply == "first -> second"
     assert [item.tool_name for item in result.tool_results] == ["first", "second"]
+
+
+def test_retrieval_route_uses_working_memory_state(tmp_path) -> None:
+    memory_store = AgentMemoryStore(tmp_path / "memory")
+    working = memory_store.read_working_memory()
+    working.current_goal = "准备后端一面"
+    working.latest_top_gap_dimensions = ["system_design"]
+    memory_store.write_working_memory(working)
+
+    snapshot = memory_store.snapshot()
+    retrieval = RetrievalService(repository=None, vector_store=None)  # type: ignore[arg-type]
+    route = retrieval.route_request(
+        query_text="今天该学什么？",
+        intent="plan",
+        memory_snapshot=snapshot,
+    )
+
+    assert route.source_types == ["gap_record", "question", "jd", "resume"]
+    assert route.dimension == "system_design"
+    assert "准备后端一面" in route.query_text
+
+
+def test_reasoner_qa_planner_uses_goal_and_source_hints(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
+    monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
+    monkeypatch.setenv("INTERVIEW_AGENT_MEMORY_DIR", str(tmp_path / "memory"))
+    get_settings.cache_clear()
+
+    container = AppContainer.build(get_settings())
+    working = container.agent_memory.read_working_memory()
+    working.current_goal = "准备后端一面"
+    working.latest_top_gap_dimensions = ["backend_basic"]
+    container.agent_memory.write_working_memory(working)
+
+    calls = container.agent_reasoner.plan_tool_calls(
+        message="帮我看看这段简历项目怎么讲",
+        intent="qa",
+        current_jd_id="jd_test",
+        memory_snapshot=container.agent_memory.snapshot(),
+        previous_results=[
+            ToolResult(
+                tool_name="recall_memory",
+                status="ok",
+                payload={"hits": []},
+                preview="none",
+            )
+        ],
+    )
+
+    assert len(calls) == 1
+    assert calls[0].tool_name == "search_evidence"
+    assert calls[0].arguments["dimension"] == "backend_basic"
+    assert calls[0].arguments["source_types"] == ["resume", "jd"]
+    assert "当前目标：准备后端一面" in calls[0].arguments["query"]
 
 
 def test_proactive_tick_supports_drift_phase_plugins_and_updates_memory(tmp_path) -> None:

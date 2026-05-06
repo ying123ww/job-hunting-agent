@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
+from interview_agent.agent.memory import MemorySnapshot
 from interview_agent.diagnosis.service import GapAnalysisService
 from interview_agent.memory2.retriever import SemanticMemoryRetriever
 from interview_agent.planning.service import PlanService
@@ -31,6 +32,8 @@ class ToolExecutionContext:
     user_id: str
     current_jd_id: str | None
     message: str
+    intent: str
+    memory_snapshot: MemorySnapshot
 
 
 class AgentTool(Protocol):
@@ -65,20 +68,36 @@ class SearchEvidenceTool:
 
     def run(self, ctx: ToolExecutionContext, arguments: dict[str, Any]) -> ToolResult:
         query = str(arguments.get("query") or ctx.message)
+        preferred_sources = arguments.get("source_types")
         dimension = arguments.get("dimension")
+        route = self.retrieval.route_request(
+            query_text=query,
+            source_types=list(preferred_sources) if isinstance(preferred_sources, list) else None,
+            dimension=str(dimension) if isinstance(dimension, str) and dimension else None,
+            intent=ctx.intent,
+            memory_snapshot=ctx.memory_snapshot,
+        )
         hits = self.retrieval.build_evidence_bundle(
             ctx.session,
             user_id=ctx.user_id,
-            query_text=query,
-            source_types=["resume", "jd", "question", "gap_record"],
-            dimension=str(dimension) if isinstance(dimension, str) and dimension else None,
+            query_text=route.query_text,
+            source_types=route.source_types,
+            dimension=route.dimension,
             limit=4,
         )
         return ToolResult(
             tool_name=self.name,
             status="ok",
-            payload={"hits": hits},
-            preview=f"retrieved {len(hits)} evidence hits",
+            payload={
+                "hits": hits,
+                "route": {
+                    "query_text": route.query_text,
+                    "source_types": route.source_types,
+                    "dimension": route.dimension or "",
+                    "rationale": route.rationale,
+                },
+            },
+            preview=f"retrieved {len(hits)} evidence hits via {route.rationale}",
         )
 
 
