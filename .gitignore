@@ -24,7 +24,12 @@ dist/
 pip-wheel-metadata/
 # Local app data
 .data/
+memory/
 # Editor and OS files
 .DS_Store
 .idea/
 .vscode/
+__pycache__/
+*.py[cod]
+.data/
+.env

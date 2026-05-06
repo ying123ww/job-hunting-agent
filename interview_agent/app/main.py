@@ -7,8 +7,11 @@ from datetime import UTC, datetime
 from fastapi import FastAPI
 from fastapi.responses import Response
 
+from interview_agent.agent.runtime import AgentTurnRequest as RuntimeAgentTurnRequest
 from interview_agent.app.config import get_settings
 from interview_agent.app.schemas import (
+    AgentTurnRequest,
+    AgentTurnResponse,
     GapAnalysisRequest,
     GapAnalysisResponse,
     HealthResponse,
@@ -36,6 +39,7 @@ async def lifespan(app: FastAPI):
     app.state.container = AppContainer.build(settings)
     logger.info("Interview Copilot Agent initialized.")
     yield
+    await app.state.container.agent_event_bus.aclose()
 
 
 app = FastAPI(title="Interview Copilot Agent", lifespan=lifespan)
@@ -85,6 +89,7 @@ def root() -> dict[str, object]:
             "plan_generate": "/plan/generate",
             "plan_today": "/plan/today",
             "plan_sync_ticktick": "/plan/sync_ticktick",
+            "agent_turn": "/agent/turn",
         },
     }
 
@@ -309,4 +314,39 @@ def sync_ticktick(request: SyncTickTickRequest) -> SyncTickTickResponse:
             synced=len(tasks),
             mode="dry_run",
             tasks=[_task_response(task) for task in tasks],
+        )
+
+
+@app.post("/agent/turn", response_model=AgentTurnResponse)
+async def agent_turn(request: AgentTurnRequest) -> AgentTurnResponse:
+    container: AppContainer = app.state.container
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        result = await container.agent_runtime.run_turn(
+            session,
+            RuntimeAgentTurnRequest(
+                user_id=user_id,
+                message=request.message,
+                jd_id=request.jd_id,
+            ),
+        )
+        return AgentTurnResponse(
+            turn_id=result.turn_id,
+            intent=result.intent,
+            reply=result.reply,
+            current_jd_id=result.current_jd_id,
+            generated_plan_id=result.generated_plan_id,
+            evidence=[
+                {
+                    "source_type": item.source_type,
+                    "document_id": item.document_id,
+                    "chunk_id": item.chunk_id,
+                    "text": item.text,
+                    "score": item.score,
+                    "metadata_summary": item.metadata_summary,
+                }
+                for item in result.evidence
+            ],
+            lifecycle=result.lifecycle,
+            memory_now=result.memory_now,
         )

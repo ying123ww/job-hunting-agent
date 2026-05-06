@@ -13,6 +13,7 @@ class AppSettings(BaseSettings):
     default_user_id: str = Field(default="u_demo")
     database_url: str = Field(default="sqlite:///./.data/app.db")
     chroma_dir: str = Field(default="./.data/chroma")
+    memory_dir: str = Field(default="./memory")
     llm_base_url: str = Field(default="")
     llm_api_key: str = Field(default="")
     llm_chat_model: str = Field(default="gpt-4o-mini")
@@ -32,6 +33,10 @@ class AppSettings(BaseSettings):
         return Path(self.chroma_dir).resolve()
 
     @property
+    def memory_path(self) -> Path:
+        return Path(self.memory_dir).resolve()
+
+    @property
     def sqlite_path(self) -> Path | None:
         prefix = "sqlite:///"
         if not self.database_url.startswith(prefix):
@@ -40,6 +45,7 @@ class AppSettings(BaseSettings):
 
     def ensure_data_dirs(self) -> None:
         self.chroma_path.mkdir(parents=True, exist_ok=True)
+        self.memory_path.mkdir(parents=True, exist_ok=True)
         if self.sqlite_path is not None:
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 

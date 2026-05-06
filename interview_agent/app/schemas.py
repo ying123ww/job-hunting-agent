@@ -125,6 +125,23 @@ class SyncTickTickResponse(BaseModel):
     tasks: list[TaskResponse]
 
 
+class AgentTurnRequest(BaseModel):
+    user_id: str | None = None
+    jd_id: str | None = None
+    message: str = Field(min_length=1)
+
+
+class AgentTurnResponse(BaseModel):
+    turn_id: str
+    intent: str
+    reply: str
+    current_jd_id: str | None = None
+    generated_plan_id: str | None = None
+    evidence: list[EvidenceResponse]
+    lifecycle: list[str]
+    memory_now: dict[str, str] = Field(default_factory=dict)
+
+
 class HealthResponse(BaseModel):
     status: str
     app_name: str
