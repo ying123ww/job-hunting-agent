@@ -12,6 +12,7 @@ from interview_agent.storage.models import (
     Document,
     DocumentChunk,
     GapRecord,
+    MemoryItem,
     Plan,
     Project,
     Question,
@@ -402,6 +403,101 @@ class InterviewRepository:
         if not document_ids:
             return []
         stmt = select(DocumentChunk).where(DocumentChunk.document_id.in_(document_ids))
+        return list(session.scalars(stmt))
+
+    def find_memory_item_by_hash(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        memory_type: str,
+        content_hash: str,
+    ) -> MemoryItem | None:
+        stmt = (
+            select(MemoryItem)
+            .where(
+                MemoryItem.user_id == user_id,
+                MemoryItem.memory_type == memory_type,
+                MemoryItem.content_hash == content_hash,
+                MemoryItem.status == "active",
+            )
+            .limit(1)
+        )
+        return session.scalars(stmt).first()
+
+    def create_memory_item(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        memory_type: str,
+        summary: str,
+        content_hash: str,
+        emotional_weight: int,
+        extra_json: dict[str, Any],
+        source_ref: str | None,
+        happened_at: datetime | None,
+        vector_id: str | None,
+    ) -> MemoryItem:
+        item = MemoryItem(
+            user_id=user_id,
+            memory_type=memory_type,
+            summary=summary,
+            content_hash=content_hash,
+            emotional_weight=emotional_weight,
+            extra_json=extra_json,
+            source_ref=source_ref,
+            happened_at=happened_at,
+            vector_id=vector_id,
+        )
+        session.add(item)
+        session.flush()
+        return item
+
+    def reinforce_memory_item(
+        self,
+        session: Session,
+        *,
+        item_id: str,
+        extra_json: dict[str, Any] | None = None,
+        happened_at: datetime | None = None,
+    ) -> MemoryItem | None:
+        item = session.get(MemoryItem, item_id)
+        if item is None:
+            return None
+        item.reinforcement += 1
+        if extra_json:
+            item.extra_json = {**item.extra_json, **extra_json}
+        if happened_at is not None:
+            item.happened_at = happened_at
+        item.updated_at = utcnow()
+        return item
+
+    def list_memory_items_by_ids(self, session: Session, *, ids: Sequence[str]) -> list[MemoryItem]:
+        if not ids:
+            return []
+        stmt = select(MemoryItem).where(MemoryItem.id.in_(ids), MemoryItem.status == "active")
+        items = list(session.scalars(stmt))
+        order = {item_id: index for index, item_id in enumerate(ids)}
+        items.sort(key=lambda item: order.get(item.id, 10**9))
+        return items
+
+    def list_memory_items(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        memory_types: Sequence[str] | None = None,
+        limit: int = 20,
+    ) -> list[MemoryItem]:
+        stmt = (
+            select(MemoryItem)
+            .where(MemoryItem.user_id == user_id, MemoryItem.status == "active")
+            .order_by(desc(MemoryItem.updated_at))
+            .limit(limit)
+        )
+        if memory_types:
+            stmt = stmt.where(MemoryItem.memory_type.in_(memory_types))
         return list(session.scalars(stmt))
 
     def upsert_ability_score(

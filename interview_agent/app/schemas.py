@@ -142,6 +142,20 @@ class AgentTurnResponse(BaseModel):
     memory_now: dict[str, str] = Field(default_factory=dict)
 
 
+class ProactiveTickRequest(BaseModel):
+    user_id: str | None = None
+    jd_id: str | None = None
+    force: bool = False
+
+
+class ProactiveTickResponse(BaseModel):
+    tick_id: str
+    action: str
+    message: str
+    generated_plan_id: str | None = None
+    drift_entered: bool = False
+
+
 class HealthResponse(BaseModel):
     status: str
     app_name: str

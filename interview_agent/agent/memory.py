@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from interview_agent.agent.events import TurnCommittedEvent
+from interview_agent.agent.events import ProactiveTickCompletedEvent, TurnCommittedEvent
 
 
 DEFAULT_SELF_MD = """# Interview Copilot Agent Self Model
@@ -189,4 +189,23 @@ class MemoryLifecycleHandler:
                 "updated_at": timestamp,
             }
         )
+        self.memory_store.rebuild_recent_context()
+
+    async def handle_proactive_tick_completed(self, event: ProactiveTickCompletedEvent) -> None:
+        if event.action == "skip":
+            return
+        timestamp = event.timestamp.isoformat(timespec="minutes")
+        entry = f"[{timestamp}] AGENT (proactive/{event.action})\n{event.message}"
+        self.memory_store.append_history(entry)
+        current = self.memory_store.read_now_state()
+        current.update(
+            {
+                "current_focus": event.message[:120],
+                "current_intent": f"proactive:{event.action}",
+                "current_jd_id": event.current_jd_id or current.get("current_jd_id", ""),
+                "current_plan_id": event.generated_plan_id or current.get("current_plan_id", ""),
+                "updated_at": timestamp,
+            }
+        )
+        self.memory_store.write_now_state(current)
         self.memory_store.rebuild_recent_context()

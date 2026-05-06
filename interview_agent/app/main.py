@@ -19,6 +19,8 @@ from interview_agent.app.schemas import (
     JDIngestRequest,
     PlanGenerateRequest,
     PlanResponse,
+    ProactiveTickRequest,
+    ProactiveTickResponse,
     QuestionIngestRequest,
     QuestionIngestResponse,
     ResumeIngestRequest,
@@ -90,6 +92,7 @@ def root() -> dict[str, object]:
             "plan_today": "/plan/today",
             "plan_sync_ticktick": "/plan/sync_ticktick",
             "agent_turn": "/agent/turn",
+            "agent_proactive_tick": "/agent/proactive/tick",
         },
     }
 
@@ -349,4 +352,25 @@ async def agent_turn(request: AgentTurnRequest) -> AgentTurnResponse:
             ],
             lifecycle=result.lifecycle,
             memory_now=result.memory_now,
+        )
+
+
+@app.post("/agent/proactive/tick", response_model=ProactiveTickResponse)
+def proactive_tick(request: ProactiveTickRequest) -> ProactiveTickResponse:
+    container: AppContainer = app.state.container
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        now_state = container.agent_memory.read_now_state()
+        result = container.proactive_service.tick(
+            session,
+            user_id=user_id,
+            current_jd_id=request.jd_id or now_state.get("current_jd_id") or None,
+            force=request.force,
+        )
+        return ProactiveTickResponse(
+            tick_id=result.tick_id,
+            action=result.action,
+            message=result.message,
+            generated_plan_id=result.generated_plan_id,
+            drift_entered=result.drift_entered,
         )

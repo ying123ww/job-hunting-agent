@@ -1,8 +1,20 @@
 import asyncio
 
 from interview_agent.agent.event_bus import EventBus
-from interview_agent.agent.events import BeforeTurnEvent
-from interview_agent.agent.runtime import AgentTurnRequest
+from interview_agent.agent.events import (
+    AfterStepEvent,
+    BeforeTurnEvent,
+    ProactiveDriftCompletedEvent,
+    ProactiveDriftStartedEvent,
+    ProactiveTickCompletedEvent,
+    ToolCallCompletedEvent,
+)
+from interview_agent.agent.memory import AgentMemoryStore, MemoryLifecycleHandler
+from interview_agent.agent.plugins import PluginManager
+from interview_agent.agent.proactive import DriftRunner, ProactiveTickService
+from interview_agent.agent.reasoner import AgentTurnDecision
+from interview_agent.agent.runtime import AgentTurnRequest, InterviewAgentRuntime
+from interview_agent.agent.tools import ToolCall, ToolRegistry, ToolResult
 from interview_agent.app.config import get_settings
 from interview_agent.core.container import AppContainer
 
@@ -100,3 +112,229 @@ def test_agent_runtime_writes_markdown_memory(monkeypatch, tmp_path) -> None:
     assert (memory_dir / "NOW.md").exists()
     assert "今天我该准备什么" in (memory_dir / "HISTORY.md").read_text(encoding="utf-8")
     assert "current_intent: plan" in (memory_dir / "NOW.md").read_text(encoding="utf-8")
+
+
+def test_tool_loop_supports_step_plugins_and_error_events(tmp_path) -> None:
+    class EchoTool:
+        name = "echo"
+
+        def run(self, ctx, arguments):
+            return ToolResult(
+                tool_name=self.name,
+                status="ok",
+                payload={"echo": arguments["message"]},
+                preview=arguments["message"],
+            )
+
+    class BrokenTool:
+        name = "broken"
+
+        def run(self, ctx, arguments):
+            raise RuntimeError("boom")
+
+    class StepRewriteModule:
+        async def run(self, frame):
+            frame.slots["tool_call"].arguments["message"] = "patched-by-plugin"
+            return frame
+
+    class StepAuditModule:
+        async def run(self, frame):
+            frame.input.result.payload["audited"] = True
+            return frame
+
+    class StepPlugin:
+        def bind(self, lifecycle) -> None:
+            return None
+
+        def before_step_modules_late(self):
+            return (StepRewriteModule(),)
+
+        def after_step_modules_early(self):
+            return (StepAuditModule(),)
+
+    class StubReasoner:
+        def detect_intent(self, message: str) -> str:
+            return "qa"
+
+        def plan_tool_calls(self, *, message: str, intent: str):
+            return [
+                ToolCall(tool_name="echo", arguments={"message": "original"}),
+                ToolCall(tool_name="broken", arguments={}),
+            ]
+
+        def finalize_turn(self, session, **kwargs):
+            tool_results = kwargs["tool_results"]
+            return AgentTurnDecision(
+                intent="qa",
+                reply=f"done:{tool_results[0].payload['echo']}",
+                tool_results=tool_results,
+            )
+
+    bus = EventBus()
+    completed_statuses: list[str] = []
+    after_step_statuses: list[str] = []
+
+    async def record_tool_completed(event: ToolCallCompletedEvent) -> None:
+        completed_statuses.append(event.status)
+
+    async def record_after_step(event: AfterStepEvent) -> None:
+        after_step_statuses.append(event.status)
+
+    bus.on(ToolCallCompletedEvent, record_tool_completed)
+    bus.on(AfterStepEvent, record_after_step)
+
+    runtime = InterviewAgentRuntime(
+        reasoner=StubReasoner(),
+        memory_store=AgentMemoryStore(tmp_path / "memory"),
+        event_bus=bus,
+        tool_registry=ToolRegistry([EchoTool(), BrokenTool()]),
+        plugin_manager=PluginManager([StepPlugin()]),
+    )
+
+    result = asyncio.run(
+        runtime.run_turn(
+            None,
+            AgentTurnRequest(
+                user_id="u_demo",
+                message="run tools",
+                jd_id=None,
+            ),
+        )
+    )
+
+    assert result.reply == "done:patched-by-plugin"
+    assert result.tool_results[0].payload["audited"] is True
+    assert result.tool_results[1].status == "error"
+    assert completed_statuses == ["ok", "error"]
+    assert after_step_statuses == ["ok", "error"]
+
+
+def test_proactive_tick_supports_drift_phase_plugins_and_updates_memory(tmp_path) -> None:
+    class EmptyDiagnosis:
+        def current(self, session, *, user_id: str, limit: int):
+            return "low", []
+
+    class EmptyPlanning:
+        def today(self, session, *, user_id: str, day):
+            return None
+
+        def generate(self, session, *, user_id: str, jd_id, gap_limit: int, day):
+            raise AssertionError("generate should not be called in drift path")
+
+    class RecentContextModule:
+        async def run(self, frame):
+            frame.slots["recent_context"] = "# RECENT_CONTEXT\n\n- plugin injected context\n"
+            return frame
+
+    class ProactivePlugin:
+        def bind(self, lifecycle) -> None:
+            return None
+
+        def proactive_before_tick_modules_late(self):
+            return (RecentContextModule(),)
+
+    memory_store = AgentMemoryStore(tmp_path / "memory")
+    bus = EventBus()
+    handler = MemoryLifecycleHandler(memory_store)
+    bus.on(ProactiveTickCompletedEvent, handler.handle_proactive_tick_completed)
+    drift_started: list[str] = []
+    drift_completed: list[str] = []
+
+    async def on_drift_started(event: ProactiveDriftStartedEvent) -> None:
+        drift_started.append(event.tick_id)
+
+    async def on_drift_completed(event: ProactiveDriftCompletedEvent) -> None:
+        drift_completed.append(event.message)
+
+    bus.on(ProactiveDriftStartedEvent, on_drift_started)
+    bus.on(ProactiveDriftCompletedEvent, on_drift_completed)
+
+    service = ProactiveTickService(
+        diagnosis=EmptyDiagnosis(),
+        planning=EmptyPlanning(),
+        memory_store=memory_store,
+        drift_runner=DriftRunner(),
+        event_bus=bus,
+        plugin_manager=PluginManager([ProactivePlugin()]),
+    )
+
+    result = service.tick(None, user_id="u_demo", current_jd_id=None, force=True)
+
+    assert result.action == "drift"
+    assert result.drift_entered is True
+    assert result.lifecycle == ["ProactiveBeforeTick", "ProactiveDrift", "ProactiveAfterTick"]
+    assert "最近上下文" in result.message
+    assert len(drift_started) == 1
+    assert drift_completed == [result.message]
+    assert "proactive:drift" in (tmp_path / "memory" / "NOW.md").read_text(encoding="utf-8")
+
+
+def test_semantic_memory_persists_turn_and_proactive_summaries(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
+    monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
+    monkeypatch.setenv("INTERVIEW_AGENT_MEMORY_DIR", str(tmp_path / "memory"))
+    get_settings.cache_clear()
+
+    container = AppContainer.build(get_settings())
+
+    with container.db.session_scope() as session:
+        _ = container.document_ingestion.ingest_document(
+            session,
+            user_id="u_demo",
+            source_type="resume",
+            text="项目经历：做过 Redis 缓存系统。",
+            content_base64=None,
+            filename="resume.md",
+            metadata={},
+        )
+        jd = container.document_ingestion.ingest_document(
+            session,
+            user_id="u_demo",
+            source_type="jd",
+            text="熟悉 Redis 与高并发系统设计。",
+            content_base64=None,
+            filename="jd.txt",
+            metadata={"company": "ByteDance", "role": "Backend Intern"},
+        )
+        container.document_ingestion.persist_jd_side_effects(
+            session,
+            user_id="u_demo",
+            document_id=jd.document_id,
+            text=jd.raw_text,
+            company="ByteDance",
+            role="Backend Intern",
+        )
+        _doc, _records, _count = container.question_ingestion.ingest_questions(
+            session,
+            user_id="u_demo",
+            text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
+            content_base64=None,
+            filename="questions.txt",
+            metadata={},
+            source_company=None,
+            source_role=None,
+        )
+
+        _ = asyncio.run(
+            container.agent_runtime.run_turn(
+                session,
+                AgentTurnRequest(
+                    user_id="u_demo",
+                    message="今天我该准备什么？",
+                    jd_id=None,
+                ),
+            )
+        )
+        _ = container.proactive_service.tick(session, user_id="u_demo", current_jd_id=None, force=True)
+        memory_items = container.semantic_memory_store.list_recent_memory(session, user_id="u_demo", limit=20)
+        hits = container.semantic_memory_retriever.retrieve(
+            session,
+            user_id="u_demo",
+            query="proactive 提醒 计划",
+            limit=10,
+        )
+
+    summaries = [item.summary for item in memory_items]
+    assert any("intent=plan" in summary for summary in summaries)
+    assert any("proactive action=" in summary for summary in summaries)
+    assert any("proactive action=" in hit.summary for hit in hits)
