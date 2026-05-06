@@ -209,6 +209,77 @@ def test_tool_loop_supports_step_plugins_and_error_events(tmp_path) -> None:
     assert after_step_statuses == ["ok", "error"]
 
 
+def test_tool_loop_can_replan_after_each_step(tmp_path) -> None:
+    class FirstTool:
+        name = "first"
+
+        def run(self, ctx, arguments):
+            return ToolResult(
+                tool_name=self.name,
+                status="ok",
+                payload={"needs_followup": True},
+                preview="first complete",
+            )
+
+    class SecondTool:
+        name = "second"
+
+        def run(self, ctx, arguments):
+            return ToolResult(
+                tool_name=self.name,
+                status="ok",
+                payload={"done": True},
+                preview="second complete",
+            )
+
+    class ReflectiveReasoner:
+        def detect_intent(self, message: str) -> str:
+            return "qa"
+
+        def max_tool_iterations(self, intent: str) -> int:
+            return 3
+
+        def plan_tool_calls(self, *, message: str, intent: str, previous_results=None):
+            if previous_results:
+                return []
+            return [ToolCall(tool_name="first", arguments={})]
+
+        def reflect_tool_results(self, *, message: str, intent: str, tool_results):
+            if len(tool_results) == 1 and tool_results[0].payload.get("needs_followup"):
+                return [ToolCall(tool_name="second", arguments={})]
+            return []
+
+        def finalize_turn(self, session, **kwargs):
+            tool_results = kwargs["tool_results"]
+            return AgentTurnDecision(
+                intent="qa",
+                reply=" -> ".join(result.tool_name for result in tool_results),
+                tool_results=tool_results,
+            )
+
+    runtime = InterviewAgentRuntime(
+        reasoner=ReflectiveReasoner(),
+        memory_store=AgentMemoryStore(tmp_path / "memory"),
+        event_bus=EventBus(),
+        tool_registry=ToolRegistry([FirstTool(), SecondTool()]),
+        plugin_manager=PluginManager([]),
+    )
+
+    result = asyncio.run(
+        runtime.run_turn(
+            None,
+            AgentTurnRequest(
+                user_id="u_demo",
+                message="multi step",
+                jd_id=None,
+            ),
+        )
+    )
+
+    assert result.reply == "first -> second"
+    assert [item.tool_name for item in result.tool_results] == ["first", "second"]
+
+
 def test_proactive_tick_supports_drift_phase_plugins_and_updates_memory(tmp_path) -> None:
     class EmptyDiagnosis:
         def current(self, session, *, user_id: str, limit: int):

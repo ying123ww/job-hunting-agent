@@ -528,8 +528,7 @@ class InterviewAgentRuntime:
     async def run_turn(self, session: Session, request: AgentTurnRequest) -> AgentTurnResponse:
         before_turn = await self._before_turn.run(BeforeTurnInput(session=session, request=request))
         before_reasoning = await self._before_reasoning.run(BeforeReasoningInput(before_turn=before_turn))
-        tool_calls = self.reasoner.plan_tool_calls(message=before_reasoning.message, intent=before_reasoning.intent)
-        tool_results = await self._run_tool_loop(before_reasoning=before_reasoning, tool_calls=tool_calls)
+        tool_results = await self._run_tool_loop(before_reasoning=before_reasoning)
         decision = self.reasoner.finalize_turn(
             session,
             user_id=before_reasoning.user_id,
@@ -548,10 +547,13 @@ class InterviewAgentRuntime:
         self,
         *,
         before_reasoning: BeforeReasoningContext,
-        tool_calls: list[ToolCall],
     ) -> list[ToolResult]:
         results: list[ToolResult] = []
-        for iteration, call in enumerate(tool_calls):
+        pending_calls = self._initial_tool_calls(before_reasoning=before_reasoning)
+        max_iterations = self._max_tool_iterations(before_reasoning.intent)
+        iteration = 0
+        while pending_calls and iteration < max_iterations:
+            call = pending_calls.pop(0)
             before_step = await self._before_step.run(
                 BeforeStepInput(
                     before_reasoning=before_reasoning,
@@ -599,12 +601,71 @@ class InterviewAgentRuntime:
                     result_preview=result.preview,
                 )
             )
+            next_calls: list[ToolCall] = []
+            if not pending_calls:
+                next_calls = self._filter_new_tool_calls(
+                    self._reflect_tool_calls(before_reasoning=before_reasoning, results=[*results, result]),
+                    [*results, result],
+                )
             after_step = await self._after_step.run(
                 AfterStepInput(
                     before_step=before_step,
                     result=result,
-                    has_more=iteration < len(tool_calls) - 1,
+                    has_more=bool(pending_calls or next_calls) and iteration < max_iterations - 1,
                 )
             )
             results.append(after_step.result)
+            iteration += 1
+            if next_calls:
+                pending_calls.extend(next_calls)
         return results
+
+    def _initial_tool_calls(self, *, before_reasoning: BeforeReasoningContext) -> list[ToolCall]:
+        try:
+            planned = self.reasoner.plan_tool_calls(
+                message=before_reasoning.message,
+                intent=before_reasoning.intent,
+                previous_results=[],
+            )
+        except TypeError:
+            planned = self.reasoner.plan_tool_calls(
+                message=before_reasoning.message,
+                intent=before_reasoning.intent,
+            )
+        return list(planned)
+
+    def _reflect_tool_calls(
+        self,
+        *,
+        before_reasoning: BeforeReasoningContext,
+        results: list[ToolResult],
+    ) -> list[ToolCall]:
+        reflect = getattr(self.reasoner, "reflect_tool_results", None)
+        if reflect is not None:
+            return list(
+                reflect(
+                    message=before_reasoning.message,
+                    intent=before_reasoning.intent,
+                    tool_results=list(results),
+                )
+            )
+        try:
+            return list(
+                self.reasoner.plan_tool_calls(
+                    message=before_reasoning.message,
+                    intent=before_reasoning.intent,
+                    previous_results=list(results),
+                )
+            )
+        except TypeError:
+            return []
+
+    def _filter_new_tool_calls(self, calls: list[ToolCall], results: list[ToolResult]) -> list[ToolCall]:
+        executed = {result.tool_name for result in results}
+        return [call for call in calls if call.tool_name not in executed]
+
+    def _max_tool_iterations(self, intent: str) -> int:
+        planner = getattr(self.reasoner, "max_tool_iterations", None)
+        if planner is None:
+            return 4
+        return int(planner(intent))

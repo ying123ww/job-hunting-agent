@@ -51,26 +51,71 @@ class AgentReasoner:
             return "diagnosis"
         return "qa"
 
-    def plan_tool_calls(self, *, message: str, intent: Intent) -> list[ToolCall]:
+    def max_tool_iterations(self, intent: Intent) -> int:
+        if intent == "qa":
+            return 3
+        return 4
+
+    def plan_tool_calls(
+        self,
+        *,
+        message: str,
+        intent: Intent,
+        previous_results: list[ToolResult] | None = None,
+    ) -> list[ToolCall]:
+        results = previous_results or []
+        executed = {result.tool_name for result in results}
+
         if intent == "plan":
-            return [
-                ToolCall(tool_name="recall_memory", arguments={"query": message}),
-                ToolCall(tool_name="plan_today", arguments={"gap_limit": 3}),
-            ]
+            if "recall_memory" not in executed:
+                return [ToolCall(tool_name="recall_memory", arguments={"query": message})]
+            if "analyze_gaps" not in executed:
+                return [ToolCall(tool_name="analyze_gaps", arguments={"limit": 3})]
+            if "plan_today" not in executed:
+                return [ToolCall(tool_name="plan_today", arguments={"gap_limit": 3})]
+            return []
+
         if intent == "diagnosis":
-            return [
-                ToolCall(tool_name="recall_memory", arguments={"query": message}),
-                ToolCall(tool_name="analyze_gaps", arguments={"limit": 3}),
-            ]
+            if "recall_memory" not in executed:
+                return [ToolCall(tool_name="recall_memory", arguments={"query": message})]
+            if "analyze_gaps" not in executed:
+                return [ToolCall(tool_name="analyze_gaps", arguments={"limit": 3})]
+            gap_result = self._find_result(results, "analyze_gaps")
+            if (
+                gap_result is not None
+                and gap_result.status == "ok"
+                and not gap_result.payload.get("gaps")
+                and "search_evidence" not in executed
+            ):
+                return [ToolCall(tool_name="search_evidence", arguments={"query": message})]
+            return []
+
         if intent == "sync":
-            return [
-                ToolCall(tool_name="plan_today", arguments={"gap_limit": 3}),
-                ToolCall(tool_name="sync_ticktick", arguments={}),
-            ]
-        return [
-            ToolCall(tool_name="recall_memory", arguments={"query": message}),
-            ToolCall(tool_name="search_evidence", arguments={"query": message}),
-        ]
+            if "plan_today" not in executed:
+                return [ToolCall(tool_name="plan_today", arguments={"gap_limit": 3})]
+            if "sync_ticktick" not in executed:
+                return [ToolCall(tool_name="sync_ticktick", arguments={})]
+            return []
+
+        if "recall_memory" not in executed:
+            return [ToolCall(tool_name="recall_memory", arguments={"query": message})]
+        if "search_evidence" not in executed:
+            recall_result = self._find_result(results, "recall_memory")
+            recall_hits = list((recall_result.payload.get("hits") if recall_result else []) or [])
+            query = message
+            if recall_hits:
+                query = f"{message}\n{recall_hits[0].summary}"
+            return [ToolCall(tool_name="search_evidence", arguments={"query": query})]
+        return []
+
+    def reflect_tool_results(
+        self,
+        *,
+        message: str,
+        intent: Intent,
+        tool_results: list[ToolResult],
+    ) -> list[ToolCall]:
+        return self.plan_tool_calls(message=message, intent=intent, previous_results=tool_results)
 
     def finalize_turn(
         self,
