@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class AppSettings(BaseSettings):
+    app_name: str = Field(default="Interview Copilot Agent")
+    env: str = Field(default="dev")
+    default_user_id: str = Field(default="u_demo")
+    database_url: str = Field(default="sqlite:///./.data/app.db")
+    chroma_dir: str = Field(default="./.data/chroma")
+    llm_base_url: str = Field(default="")
+    llm_api_key: str = Field(default="")
+    llm_chat_model: str = Field(default="gpt-4o-mini")
+    llm_embedding_model: str = Field(default="text-embedding-3-small")
+    embedding_dimensions: int = Field(default=64)
+    text_chunk_size: int = Field(default=600)
+    text_chunk_overlap: int = Field(default=80)
+
+    model_config = SettingsConfigDict(
+        env_prefix="INTERVIEW_AGENT_",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    @property
+    def chroma_path(self) -> Path:
+        return Path(self.chroma_dir).resolve()
+
+    @property
+    def sqlite_path(self) -> Path | None:
+        prefix = "sqlite:///"
+        if not self.database_url.startswith(prefix):
+            return None
+        return Path(self.database_url.removeprefix(prefix)).resolve()
+
+    def ensure_data_dirs(self) -> None:
+        self.chroma_path.mkdir(parents=True, exist_ok=True)
+        if self.sqlite_path is not None:
+            self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> AppSettings:
+    settings = AppSettings()
+    settings.ensure_data_dirs()
+    return settings

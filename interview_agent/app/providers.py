@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import dataclass
+from typing import Any
+
+import httpx
+
+from interview_agent.app.config import AppSettings
+
+
+def _hash_embedding(text: str, dimensions: int) -> list[float]:
+    digest = hashlib.sha256(text.encode("utf-8")).digest()
+    vector: list[float] = []
+    while len(vector) < dimensions:
+        for value in digest:
+            vector.append((value / 255.0) * 2.0 - 1.0)
+            if len(vector) >= dimensions:
+                break
+        digest = hashlib.sha256(digest).digest()
+    return vector
+
+
+@dataclass(slots=True)
+class OpenAICompatibleProvider:
+    settings: AppSettings
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        if not self.settings.llm_base_url or not self.settings.llm_api_key:
+            return [
+                _hash_embedding(text, self.settings.embedding_dimensions)
+                for text in texts
+            ]
+
+        payload = {
+            "model": self.settings.llm_embedding_model,
+            "input": texts,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.settings.llm_api_key}",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=30.0) as client:
+            response = client.post(
+                f"{self.settings.llm_base_url.rstrip('/')}/embeddings",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+        data = response.json()["data"]
+        return [item["embedding"] for item in data]
+
+    def chat(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_format: dict[str, Any] | None = None,
+    ) -> str:
+        if not self.settings.llm_base_url or not self.settings.llm_api_key:
+            content = {
+                "summary": "LLM fallback mode is active. Deterministic local heuristics are in use.",
+                "system_prompt": system_prompt[:120],
+                "user_prompt": user_prompt[:240],
+            }
+            return json.dumps(content, ensure_ascii=False)
+
+        payload: dict[str, Any] = {
+            "model": self.settings.llm_chat_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        headers = {
+            "Authorization": f"Bearer {self.settings.llm_api_key}",
+            "Content-Type": "application/json",
+        }
+        with httpx.Client(timeout=60.0) as client:
+            response = client.post(
+                f"{self.settings.llm_base_url.rstrip('/')}/chat/completions",
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]

@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: interview-copilot-agent
+Version: 0.1.0
+Summary: Interview Copilot Agent backend MVP
+Requires-Python: >=3.12
+Requires-Dist: chromadb>=0.5.5
+Requires-Dist: fastapi>=0.111.0
+Requires-Dist: httpx>=0.27.0
+Requires-Dist: pydantic>=2.7.0
+Requires-Dist: pydantic-settings>=2.2.1
+Requires-Dist: pypdf>=4.2.0
+Requires-Dist: sqlalchemy>=2.0.30
+Requires-Dist: uvicorn>=0.30.0
+Provides-Extra: dev
+Requires-Dist: pytest>=8.2.0; extra == "dev"
