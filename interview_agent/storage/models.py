@@ -29,6 +29,18 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    target_roles: Mapped[list[str]] = mapped_column(JSON, default=list)
+    target_companies: Mapped[list[str]] = mapped_column(JSON, default=list)
+    weak_points: Mapped[list[str]] = mapped_column(JSON, default=list)
+    learning_preference: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    latest_overall_risk: Mapped[str | None] = mapped_column(String, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Document(Base):
     __tablename__ = "documents"
 

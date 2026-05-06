@@ -69,6 +69,12 @@ def test_end_to_end_service_flow(monkeypatch, tmp_path) -> None:
         assert overall_risk in {"low", "medium", "high"}
         assert gaps
         assert gaps[0].evidence
+        profile = container.repository.get_user_profile(session, user_id="u_demo")
+        assert profile is not None
+        assert "ByteDance" in profile.target_companies
+        assert "Backend Intern" in profile.target_roles
+        assert profile.latest_overall_risk == overall_risk
+        assert profile.weak_points
 
         plan = container.planning.generate(
             session,

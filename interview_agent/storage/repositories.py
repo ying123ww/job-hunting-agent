@@ -19,6 +19,7 @@ from interview_agent.storage.models import (
     TargetJD,
     Task,
     User,
+    UserProfile,
 )
 
 
@@ -34,6 +35,42 @@ class InterviewRepository:
             session.add(user)
             session.flush()
         return user
+
+    def get_user_profile(self, session: Session, *, user_id: str) -> UserProfile | None:
+        return session.get(UserProfile, user_id)
+
+    def upsert_user_profile(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        target_roles: Sequence[str] | None = None,
+        target_companies: Sequence[str] | None = None,
+        weak_points: Sequence[str] | None = None,
+        learning_preference: dict[str, Any] | None = None,
+        latest_overall_risk: str | None = None,
+    ) -> UserProfile:
+        self.ensure_user(session, user_id)
+        profile = session.get(UserProfile, user_id)
+        if profile is None:
+            profile = UserProfile(
+                user_id=user_id,
+                learning_preference=dict(learning_preference or {}),
+            )
+            session.add(profile)
+            session.flush()
+        if target_roles:
+            profile.target_roles = self._merge_unique(profile.target_roles, target_roles)
+        if target_companies:
+            profile.target_companies = self._merge_unique(profile.target_companies, target_companies)
+        if weak_points is not None:
+            profile.weak_points = [item for item in weak_points if item]
+        if learning_preference:
+            profile.learning_preference = {**profile.learning_preference, **learning_preference}
+        if latest_overall_risk is not None:
+            profile.latest_overall_risk = latest_overall_risk
+        profile.updated_at = utcnow()
+        return profile
 
     def deactivate_documents(
         self,
@@ -500,6 +537,10 @@ class InterviewRepository:
             stmt = stmt.where(MemoryItem.memory_type.in_(memory_types))
         return list(session.scalars(stmt))
 
+    def list_ability_scores(self, session: Session, *, user_id: str) -> list[AbilityScore]:
+        stmt = select(AbilityScore).where(AbilityScore.user_id == user_id).order_by(desc(AbilityScore.updated_at))
+        return list(session.scalars(stmt))
+
     def upsert_ability_score(
         self,
         session: Session,
@@ -522,3 +563,14 @@ class InterviewRepository:
             current.score = score
             current.confidence = confidence
             current.updated_at = utcnow()
+
+    def _merge_unique(self, current: Sequence[str], incoming: Sequence[str]) -> list[str]:
+        merged = list(current)
+        seen = {item for item in merged if item}
+        for item in incoming:
+            normalized = str(item).strip()
+            if not normalized or normalized in seen:
+                continue
+            merged.append(normalized)
+            seen.add(normalized)
+        return merged

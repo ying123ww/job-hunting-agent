@@ -110,8 +110,10 @@ def test_agent_runtime_writes_markdown_memory(monkeypatch, tmp_path) -> None:
     assert (memory_dir / "RECENT_CONTEXT.md").exists()
     assert (memory_dir / "PENDING.md").exists()
     assert (memory_dir / "NOW.md").exists()
+    assert (memory_dir / "WORKING_MEMORY.json").exists()
     assert "今天我该准备什么" in (memory_dir / "HISTORY.md").read_text(encoding="utf-8")
     assert "current_intent: plan" in (memory_dir / "NOW.md").read_text(encoding="utf-8")
+    assert "current_goal" in (memory_dir / "NOW.md").read_text(encoding="utf-8")
 
 
 def test_tool_loop_supports_step_plugins_and_error_events(tmp_path) -> None:
@@ -409,3 +411,70 @@ def test_semantic_memory_persists_turn_and_proactive_summaries(monkeypatch, tmp_
     assert any("intent=plan" in summary for summary in summaries)
     assert any("proactive action=" in summary for summary in summaries)
     assert any("proactive action=" in hit.summary for hit in hits)
+
+
+def test_context_builder_includes_structured_profile_and_working_memory(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
+    monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
+    monkeypatch.setenv("INTERVIEW_AGENT_MEMORY_DIR", str(tmp_path / "memory"))
+    get_settings.cache_clear()
+
+    container = AppContainer.build(get_settings())
+
+    with container.db.session_scope() as session:
+        _ = container.document_ingestion.ingest_document(
+            session,
+            user_id="u_demo",
+            source_type="resume",
+            text="项目经历：做过 Redis 缓存系统。",
+            content_base64=None,
+            filename="resume.md",
+            metadata={},
+        )
+        jd_doc = container.document_ingestion.ingest_document(
+            session,
+            user_id="u_demo",
+            source_type="jd",
+            text="熟悉 Redis 与高并发系统设计。",
+            content_base64=None,
+            filename="jd.txt",
+            metadata={"company": "ByteDance", "role": "Backend Intern"},
+        )
+        jd = container.document_ingestion.persist_jd_side_effects(
+            session,
+            user_id="u_demo",
+            document_id=jd_doc.document_id,
+            text=jd_doc.raw_text,
+            company="ByteDance",
+            role="Backend Intern",
+        )
+        _doc, _records, _count = container.question_ingestion.ingest_questions(
+            session,
+            user_id="u_demo",
+            text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
+            content_base64=None,
+            filename="questions.txt",
+            metadata={},
+            source_company=None,
+            source_role=None,
+        )
+        _overall_risk, gaps = container.diagnosis.analyze(
+            session,
+            user_id="u_demo",
+            jd_id=jd.id,
+            limit=3,
+            persist=True,
+        )
+        snapshot = container.agent_memory.snapshot()
+        context = container.agent_context.build(
+            session,
+            user_id="u_demo",
+            current_jd_id=jd.id,
+            memory_snapshot=snapshot,
+            evidence=gaps[0].evidence,
+        )
+
+    assert "## Structured Profile" in context.memory_block
+    assert "Backend Intern" in context.memory_block
+    assert "ByteDance" in context.memory_block
+    assert "## Working Memory" in context.memory_block

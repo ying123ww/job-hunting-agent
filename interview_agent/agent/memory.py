@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,7 +25,10 @@ DEFAULT_NOW_MD = """# NOW
 - current_intent:
 - current_jd_id:
 - current_plan_id:
+- current_goal:
+- current_mock_session:
 - latest_top_gap_dimensions:
+- temporary_context:
 - updated_at:
 """
 
@@ -38,6 +42,50 @@ def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def _empty_items() -> list[str]:
+    return []
+
+
+@dataclass(slots=True)
+class WorkingMemoryState:
+    current_focus: str = ""
+    current_intent: str = ""
+    current_jd_id: str = ""
+    current_plan_id: str = ""
+    current_goal: str = ""
+    current_mock_session: str = ""
+    latest_top_gap_dimensions: list[str] = field(default_factory=_empty_items)
+    temporary_context: list[str] = field(default_factory=_empty_items)
+    updated_at: str = ""
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, object]) -> "WorkingMemoryState":
+        return cls(
+            current_focus=str(payload.get("current_focus", "") or ""),
+            current_intent=str(payload.get("current_intent", "") or ""),
+            current_jd_id=str(payload.get("current_jd_id", "") or ""),
+            current_plan_id=str(payload.get("current_plan_id", "") or ""),
+            current_goal=str(payload.get("current_goal", "") or ""),
+            current_mock_session=str(payload.get("current_mock_session", "") or ""),
+            latest_top_gap_dimensions=[str(item) for item in payload.get("latest_top_gap_dimensions", []) or [] if item],
+            temporary_context=[str(item) for item in payload.get("temporary_context", []) or [] if item],
+            updated_at=str(payload.get("updated_at", "") or ""),
+        )
+
+    def to_now_state(self) -> dict[str, str]:
+        return {
+            "current_focus": self.current_focus,
+            "current_intent": self.current_intent,
+            "current_jd_id": self.current_jd_id,
+            "current_plan_id": self.current_plan_id,
+            "current_goal": self.current_goal,
+            "current_mock_session": self.current_mock_session,
+            "latest_top_gap_dimensions": ",".join(self.latest_top_gap_dimensions),
+            "temporary_context": " | ".join(self.temporary_context),
+            "updated_at": self.updated_at,
+        }
+
+
 @dataclass(slots=True)
 class MemorySnapshot:
     long_term: str
@@ -46,6 +94,7 @@ class MemorySnapshot:
     pending: str
     now_text: str
     now_state: dict[str, str]
+    working_memory: WorkingMemoryState
     history_excerpt: str
 
 
@@ -61,6 +110,7 @@ class AgentMemoryStore:
         self.recent_context_file = self.memory_dir / "RECENT_CONTEXT.md"
         self.pending_file = self.memory_dir / "PENDING.md"
         self.now_file = self.memory_dir / "NOW.md"
+        self.working_memory_file = self.memory_dir / "WORKING_MEMORY.json"
         self._ensure_files()
 
     def _ensure_files(self) -> None:
@@ -70,6 +120,10 @@ class AgentMemoryStore:
         self._ensure_file(self.recent_context_file, DEFAULT_RECENT_CONTEXT_MD)
         self._ensure_file(self.pending_file, "")
         self._ensure_file(self.now_file, DEFAULT_NOW_MD)
+        self._ensure_file(
+            self.working_memory_file,
+            json.dumps(asdict(WorkingMemoryState()), ensure_ascii=False, indent=2) + "\n",
+        )
 
     def _ensure_file(self, path: Path, default_content: str) -> None:
         if not path.exists():
@@ -130,38 +184,92 @@ class AgentMemoryStore:
     def read_now(self) -> str:
         return self.now_file.read_text(encoding="utf-8")
 
+    def read_working_memory(self) -> WorkingMemoryState:
+        try:
+            payload = json.loads(self.working_memory_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, FileNotFoundError):
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        if not any(payload.values()):
+            payload = self._parse_now_text()
+        return WorkingMemoryState.from_dict(payload)
+
+    def write_working_memory(self, state: WorkingMemoryState) -> None:
+        self.working_memory_file.write_text(
+            json.dumps(asdict(state), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self._write_now_from_working_memory(state)
+
     def read_now_state(self) -> dict[str, str]:
-        state: dict[str, str] = {}
-        for line in self.read_now().splitlines():
-            stripped = line.strip()
-            if not stripped.startswith("- ") or ":" not in stripped:
-                continue
-            key, value = stripped[2:].split(":", 1)
-            state[key.strip()] = value.strip()
-        return state
+        return self.read_working_memory().to_now_state()
 
     def write_now_state(self, state: dict[str, str]) -> None:
+        current = self.read_working_memory()
+        current.current_focus = state.get("current_focus", current.current_focus)
+        current.current_intent = state.get("current_intent", current.current_intent)
+        current.current_jd_id = state.get("current_jd_id", current.current_jd_id)
+        current.current_plan_id = state.get("current_plan_id", current.current_plan_id)
+        current.current_goal = state.get("current_goal", current.current_goal)
+        current.current_mock_session = state.get("current_mock_session", current.current_mock_session)
+        if "latest_top_gap_dimensions" in state:
+            current.latest_top_gap_dimensions = [
+                item.strip() for item in state.get("latest_top_gap_dimensions", "").split(",") if item.strip()
+            ]
+        if "temporary_context" in state:
+            current.temporary_context = [
+                item.strip() for item in state.get("temporary_context", "").split("|") if item.strip()
+            ]
+        current.updated_at = state.get("updated_at", current.updated_at)
+        self.write_working_memory(current)
+
+    def _write_now_from_working_memory(self, state: WorkingMemoryState) -> None:
         lines = ["# NOW", ""]
         keys = [
             "current_focus",
             "current_intent",
             "current_jd_id",
             "current_plan_id",
+            "current_goal",
+            "current_mock_session",
             "latest_top_gap_dimensions",
+            "temporary_context",
             "updated_at",
         ]
+        now_state = state.to_now_state()
         for key in keys:
-            lines.append(f"- {key}: {state.get(key, '')}")
+            lines.append(f"- {key}: {now_state.get(key, '')}")
         self.now_file.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
+    def _parse_now_text(self) -> dict[str, object]:
+        state: dict[str, object] = {}
+        for line in self.read_now().splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("- ") or ":" not in stripped:
+                continue
+            key, value = stripped[2:].split(":", 1)
+            state[key.strip()] = value.strip()
+        if "latest_top_gap_dimensions" in state:
+            state["latest_top_gap_dimensions"] = [
+                item.strip() for item in str(state["latest_top_gap_dimensions"]).split(",") if item.strip()
+            ]
+        if "temporary_context" in state:
+            state["temporary_context"] = [
+                item.strip() for item in str(state["temporary_context"]).split("|") if item.strip()
+            ]
+        return state
+
     def snapshot(self, *, max_history_chars: int = 3000) -> MemorySnapshot:
+        working_memory = self.read_working_memory()
         return MemorySnapshot(
             long_term=self.read_long_term(),
             self_model=self.read_self(),
             recent_context=self.read_recent_context(),
             pending=self.read_pending(),
             now_text=self.read_now(),
-            now_state=self.read_now_state(),
+            now_state=working_memory.to_now_state(),
+            working_memory=working_memory,
             history_excerpt=self.read_history(max_chars=max_history_chars),
         )
 
@@ -179,16 +287,22 @@ class MemoryLifecycleHandler:
         self.memory_store.append_history(entry)
         if event.pending_memory:
             self.memory_store.append_pending(event.pending_memory)
-        self.memory_store.write_now_state(
-            {
-                "current_focus": event.message[:120],
-                "current_intent": event.intent,
-                "current_jd_id": event.current_jd_id or "",
-                "current_plan_id": event.generated_plan_id or "",
-                "latest_top_gap_dimensions": ",".join(event.top_gap_dimensions),
-                "updated_at": timestamp,
-            }
+        current = self.memory_store.read_working_memory()
+        current.current_focus = event.message[:120]
+        current.current_intent = event.intent
+        current.current_jd_id = event.current_jd_id or ""
+        current.current_plan_id = event.generated_plan_id or ""
+        current.current_goal = self._derive_goal(
+            current_intent=event.intent,
+            top_gap_dimensions=event.top_gap_dimensions,
+            fallback=event.message[:120],
         )
+        current.latest_top_gap_dimensions = list(event.top_gap_dimensions)
+        current.temporary_context = self._trim_context(
+            [*current.temporary_context, event.message[:120], event.reply[:160]]
+        )
+        current.updated_at = timestamp
+        self.memory_store.write_working_memory(current)
         self.memory_store.rebuild_recent_context()
 
     async def handle_proactive_tick_completed(self, event: ProactiveTickCompletedEvent) -> None:
@@ -197,15 +311,26 @@ class MemoryLifecycleHandler:
         timestamp = event.timestamp.isoformat(timespec="minutes")
         entry = f"[{timestamp}] AGENT (proactive/{event.action})\n{event.message}"
         self.memory_store.append_history(entry)
-        current = self.memory_store.read_now_state()
-        current.update(
-            {
-                "current_focus": event.message[:120],
-                "current_intent": f"proactive:{event.action}",
-                "current_jd_id": event.current_jd_id or current.get("current_jd_id", ""),
-                "current_plan_id": event.generated_plan_id or current.get("current_plan_id", ""),
-                "updated_at": timestamp,
-            }
-        )
-        self.memory_store.write_now_state(current)
+        current = self.memory_store.read_working_memory()
+        current.current_focus = event.message[:120]
+        current.current_intent = f"proactive:{event.action}"
+        current.current_jd_id = event.current_jd_id or current.current_jd_id
+        current.current_plan_id = event.generated_plan_id or current.current_plan_id
+        current.current_goal = event.message[:120]
+        current.temporary_context = self._trim_context([*current.temporary_context, event.message[:160]])
+        current.updated_at = timestamp
+        self.memory_store.write_working_memory(current)
         self.memory_store.rebuild_recent_context()
+
+    def _derive_goal(self, *, current_intent: str, top_gap_dimensions: list[str], fallback: str) -> str:
+        if top_gap_dimensions:
+            return f"优先修复 {top_gap_dimensions[0]}"
+        if current_intent == "plan":
+            return "执行当前计划中的最高优先级任务"
+        if current_intent == "diagnosis":
+            return "明确当前最高优先级短板"
+        return fallback
+
+    def _trim_context(self, items: list[str], *, limit: int = 4) -> list[str]:
+        normalized = [item.strip() for item in items if item.strip()]
+        return normalized[-limit:]

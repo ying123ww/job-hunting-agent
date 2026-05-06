@@ -175,7 +175,7 @@ class DocumentIngestionService:
         role: str | None,
     ):
         requirements = extract_jd_requirements(text)
-        return self.repository.create_target_jd(
+        jd = self.repository.create_target_jd(
             session,
             user_id=user_id,
             document_id=document_id,
@@ -184,6 +184,13 @@ class DocumentIngestionService:
             raw_text=text,
             structured_requirements=requirements,
         )
+        self.repository.upsert_user_profile(
+            session,
+            user_id=user_id,
+            target_roles=[role] if role else None,
+            target_companies=[company] if company else None,
+        )
+        return jd
 
 
 class QuestionIngestionService:

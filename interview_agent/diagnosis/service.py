@@ -170,6 +170,12 @@ class GapAnalysisService:
         top_gaps = gaps[:limit]
         overall_risk = self._overall_risk(top_gaps)
         self._update_ability_scores(session, user_id=user_id, gaps=top_gaps)
+        self.repository.upsert_user_profile(
+            session,
+            user_id=user_id,
+            weak_points=[gap.dimension for gap in top_gaps],
+            latest_overall_risk=overall_risk,
+        )
         return overall_risk, top_gaps
 
     def current(self, session: Session, *, user_id: str, limit: int) -> tuple[str, list[DiagnosedGap]]:
