@@ -140,6 +140,7 @@ class AppContainer:
             drift_runner=DriftRunner(),
             event_bus=agent_event_bus,
             plugin_manager=plugin_manager,
+            repository=repository,
         )
         db.create_all()
         return cls(

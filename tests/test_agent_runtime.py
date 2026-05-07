@@ -1,4 +1,6 @@
 import asyncio
+from datetime import datetime
+from types import SimpleNamespace
 
 from interview_agent.agent.event_bus import EventBus
 from interview_agent.agent.events import (
@@ -390,7 +392,7 @@ def test_proactive_tick_supports_drift_phase_plugins_and_updates_memory(tmp_path
 
     assert result.action == "drift"
     assert result.drift_entered is True
-    assert result.lifecycle == ["ProactiveBeforeTick", "ProactiveDrift", "ProactiveAfterTick"]
+    assert result.lifecycle == ["ProactiveBeforeTick", "ProactiveStateMachine", "ProactiveDrift", "ProactiveAfterTick"]
     assert "最近上下文" in result.message
     assert len(drift_started) == 1
     assert drift_completed == [result.message]
@@ -466,6 +468,164 @@ def test_semantic_memory_persists_turn_and_proactive_summaries(monkeypatch, tmp_
     assert any("intent=plan" in summary for summary in summaries)
     assert any("proactive action=" in summary for summary in summaries)
     assert any("proactive action=" in hit.summary for hit in hits)
+
+
+def test_proactive_tick_respects_do_not_disturb_policy(tmp_path) -> None:
+    class EmptyDiagnosis:
+        def current(self, session, *, user_id: str, limit: int):
+            return "medium", []
+
+    class PlanningWithTask:
+        def today(self, session, *, user_id: str, day):
+            return SimpleNamespace(
+                plan_id="plan_1",
+                tasks=[
+                    SimpleNamespace(
+                        title="复习 Redis",
+                        duration_min=25,
+                        reason="数据库基础仍需加强",
+                        priority=3,
+                    )
+                ],
+            )
+
+        def generate(self, session, *, user_id: str, jd_id, gap_limit: int, day):
+            raise AssertionError("generate should not be called")
+
+    class RepoStub:
+        def get_user_profile(self, session, *, user_id: str):
+            return SimpleNamespace(
+                learning_preference={
+                    "proactive_enabled": True,
+                    "do_not_disturb_start": "22:00",
+                    "do_not_disturb_end": "08:00",
+                    "reminder_time": "21:00",
+                }
+            )
+
+    service = ProactiveTickService(
+        diagnosis=EmptyDiagnosis(),
+        planning=PlanningWithTask(),
+        memory_store=AgentMemoryStore(tmp_path / "memory"),
+        drift_runner=DriftRunner(),
+        event_bus=EventBus(),
+        plugin_manager=PluginManager([]),
+        repository=RepoStub(),
+        now_fn=lambda: datetime(2026, 5, 6, 23, 30),
+    )
+
+    result = service.tick(None, user_id="u_demo", current_jd_id=None, force=False)
+
+    assert result.action == "skip"
+    assert "免打扰" in result.message
+    assert result.lifecycle == ["ProactiveBeforeTick", "ProactiveStateMachine", "ProactiveAfterTick"]
+
+
+def test_proactive_tick_urgent_signal_bypasses_cooldown(tmp_path) -> None:
+    class HighRiskDiagnosis:
+        def current(self, session, *, user_id: str, limit: int):
+            return "high", [SimpleNamespace(dimension="system_design", severity="high")]
+
+    class EmptyPlanning:
+        def today(self, session, *, user_id: str, day):
+            return None
+
+        def generate(self, session, *, user_id: str, jd_id, gap_limit: int, day):
+            return SimpleNamespace(plan_id="plan_generated")
+
+    class RepoStub:
+        def get_user_profile(self, session, *, user_id: str):
+            return SimpleNamespace(
+                learning_preference={
+                    "proactive_enabled": True,
+                    "do_not_disturb_start": "23:00",
+                    "do_not_disturb_end": "08:00",
+                    "reminder_time": "21:00",
+                    "cooldown_hours": 12,
+                    "max_reminders_per_day": 1,
+                }
+            )
+
+    memory_store = AgentMemoryStore(tmp_path / "memory")
+    working = memory_store.read_working_memory()
+    working.last_proactive_at = "2026-05-06T21:30:00"
+    working.last_proactive_action = "reply"
+    memory_store.write_working_memory(working)
+
+    service = ProactiveTickService(
+        diagnosis=HighRiskDiagnosis(),
+        planning=EmptyPlanning(),
+        memory_store=memory_store,
+        drift_runner=DriftRunner(),
+        event_bus=EventBus(),
+        plugin_manager=PluginManager([]),
+        repository=RepoStub(),
+        now_fn=lambda: datetime(2026, 5, 6, 22, 0),
+    )
+
+    result = service.tick(None, user_id="u_demo", current_jd_id=None, force=False)
+
+    assert result.action == "reply"
+    assert result.generated_plan_id == "plan_generated"
+    assert "system_design" in result.message
+
+
+def test_proactive_tick_cooldown_blocks_non_urgent_reminders(tmp_path) -> None:
+    class MediumDiagnosis:
+        def current(self, session, *, user_id: str, limit: int):
+            return "medium", []
+
+    class PlanningWithTask:
+        def today(self, session, *, user_id: str, day):
+            return SimpleNamespace(
+                plan_id="plan_1",
+                tasks=[
+                    SimpleNamespace(
+                        title="补一题 Redis",
+                        duration_min=10,
+                        reason="保持手感",
+                        priority=4,
+                    )
+                ],
+            )
+
+        def generate(self, session, *, user_id: str, jd_id, gap_limit: int, day):
+            raise AssertionError("generate should not be called")
+
+    class RepoStub:
+        def get_user_profile(self, session, *, user_id: str):
+            return SimpleNamespace(
+                learning_preference={
+                    "proactive_enabled": True,
+                    "do_not_disturb_start": "23:00",
+                    "do_not_disturb_end": "08:00",
+                    "reminder_time": "09:00",
+                    "cooldown_hours": 30,
+                    "max_reminders_per_day": 5,
+                }
+            )
+
+    memory_store = AgentMemoryStore(tmp_path / "memory")
+    working = memory_store.read_working_memory()
+    working.last_proactive_at = "2026-05-06T21:30:00"
+    working.last_proactive_action = "reply"
+    memory_store.write_working_memory(working)
+
+    service = ProactiveTickService(
+        diagnosis=MediumDiagnosis(),
+        planning=PlanningWithTask(),
+        memory_store=memory_store,
+        drift_runner=DriftRunner(),
+        event_bus=EventBus(),
+        plugin_manager=PluginManager([]),
+        repository=RepoStub(),
+        now_fn=lambda: datetime(2026, 5, 7, 10, 0),
+    )
+
+    result = service.tick(None, user_id="u_demo", current_jd_id=None, force=False)
+
+    assert result.action == "skip"
+    assert "上次主动提醒" in result.message or "还很近" in result.message
 
 
 def test_context_builder_includes_structured_profile_and_working_memory(monkeypatch, tmp_path) -> None:

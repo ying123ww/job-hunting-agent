@@ -29,6 +29,8 @@ DEFAULT_NOW_MD = """# NOW
 - current_mock_session:
 - latest_top_gap_dimensions:
 - temporary_context:
+- last_proactive_at:
+- last_proactive_action:
 - updated_at:
 """
 
@@ -56,6 +58,8 @@ class WorkingMemoryState:
     current_mock_session: str = ""
     latest_top_gap_dimensions: list[str] = field(default_factory=_empty_items)
     temporary_context: list[str] = field(default_factory=_empty_items)
+    last_proactive_at: str = ""
+    last_proactive_action: str = ""
     updated_at: str = ""
 
     @classmethod
@@ -69,6 +73,8 @@ class WorkingMemoryState:
             current_mock_session=str(payload.get("current_mock_session", "") or ""),
             latest_top_gap_dimensions=[str(item) for item in payload.get("latest_top_gap_dimensions", []) or [] if item],
             temporary_context=[str(item) for item in payload.get("temporary_context", []) or [] if item],
+            last_proactive_at=str(payload.get("last_proactive_at", "") or ""),
+            last_proactive_action=str(payload.get("last_proactive_action", "") or ""),
             updated_at=str(payload.get("updated_at", "") or ""),
         )
 
@@ -82,6 +88,8 @@ class WorkingMemoryState:
             "current_mock_session": self.current_mock_session,
             "latest_top_gap_dimensions": ",".join(self.latest_top_gap_dimensions),
             "temporary_context": " | ".join(self.temporary_context),
+            "last_proactive_at": self.last_proactive_at,
+            "last_proactive_action": self.last_proactive_action,
             "updated_at": self.updated_at,
         }
 
@@ -221,6 +229,8 @@ class AgentMemoryStore:
             current.temporary_context = [
                 item.strip() for item in state.get("temporary_context", "").split("|") if item.strip()
             ]
+        current.last_proactive_at = state.get("last_proactive_at", current.last_proactive_at)
+        current.last_proactive_action = state.get("last_proactive_action", current.last_proactive_action)
         current.updated_at = state.get("updated_at", current.updated_at)
         self.write_working_memory(current)
 
@@ -235,6 +245,8 @@ class AgentMemoryStore:
             "current_mock_session",
             "latest_top_gap_dimensions",
             "temporary_context",
+            "last_proactive_at",
+            "last_proactive_action",
             "updated_at",
         ]
         now_state = state.to_now_state()
@@ -318,6 +330,8 @@ class MemoryLifecycleHandler:
         current.current_plan_id = event.generated_plan_id or current.current_plan_id
         current.current_goal = event.message[:120]
         current.temporary_context = self._trim_context([*current.temporary_context, event.message[:160]])
+        current.last_proactive_at = timestamp
+        current.last_proactive_action = event.action
         current.updated_at = timestamp
         self.memory_store.write_working_memory(current)
         self.memory_store.rebuild_recent_context()

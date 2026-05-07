@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from interview_agent.agent.memory import AgentMemoryStore, MemorySnapshot
 from interview_agent.agent.plugins import PluginManager
 from interview_agent.diagnosis.service import GapAnalysisService
 from interview_agent.planning.service import PlanService
+from interview_agent.storage.repositories import InterviewRepository
 
 
 def utcnow() -> datetime:
@@ -28,6 +29,16 @@ def _empty_lifecycle() -> list[str]:
 
 
 @dataclass(slots=True)
+class ProactivePolicy:
+    proactive_enabled: bool = True
+    reminder_time: str = "21:00"
+    do_not_disturb_start: str = "23:00"
+    do_not_disturb_end: str = "08:00"
+    cooldown_hours: int = 12
+    max_reminders_per_day: int = 1
+
+
+@dataclass(slots=True)
 class ProactiveTickContext:
     session: Session
     tick_id: str
@@ -35,6 +46,8 @@ class ProactiveTickContext:
     current_jd_id: str | None
     force: bool
     memory_snapshot: MemorySnapshot
+    overall_risk: str = "low"
+    policy: ProactivePolicy = field(default_factory=ProactivePolicy)
     current_plan_id: str | None = None
     latest_gaps: list[object] = field(default_factory=list)
     today_tasks: list[object] = field(default_factory=list)
@@ -114,6 +127,27 @@ class _LoadSnapshotModule:
         return frame
 
 
+class _LoadPolicyModule:
+    def __init__(self, repository: InterviewRepository | None) -> None:
+        self.repository = repository
+
+    async def run(self, frame: BeforeTickFrame) -> BeforeTickFrame:
+        policy = ProactivePolicy()
+        if self.repository is not None:
+            profile = self.repository.get_user_profile(frame.input.session, user_id=frame.input.user_id)
+            learning_preference = dict(getattr(profile, "learning_preference", {}) or {})
+            policy = ProactivePolicy(
+                proactive_enabled=bool(learning_preference.get("proactive_enabled", True)),
+                reminder_time=str(learning_preference.get("reminder_time", "21:00")),
+                do_not_disturb_start=str(learning_preference.get("do_not_disturb_start", "23:00")),
+                do_not_disturb_end=str(learning_preference.get("do_not_disturb_end", "08:00")),
+                cooldown_hours=int(learning_preference.get("cooldown_hours", 12)),
+                max_reminders_per_day=int(learning_preference.get("max_reminders_per_day", 1)),
+            )
+        frame.slots["policy"] = policy
+        return frame
+
+
 class _CollectSignalsModule:
     def __init__(self, diagnosis: GapAnalysisService, planning: PlanService) -> None:
         self.diagnosis = diagnosis
@@ -154,6 +188,8 @@ class _ReturnBeforeTickModule:
             current_jd_id=frame.slots.get("current_jd_id", frame.input.current_jd_id),
             force=frame.input.force,
             memory_snapshot=frame.slots["memory_snapshot"],
+            overall_risk=str(frame.slots.get("overall_risk", "low")),
+            policy=frame.slots.get("policy", ProactivePolicy()),
             current_plan_id=getattr(frame.slots.get("plan"), "plan_id", None),
             latest_gaps=list(frame.slots["latest_gaps"]),
             today_tasks=list(frame.slots["today_tasks"]),
@@ -269,6 +305,8 @@ class ProactiveTickService:
         drift_runner: DriftRunner,
         event_bus: EventBus,
         plugin_manager: PluginManager,
+        repository: InterviewRepository | None = None,
+        now_fn=utcnow,
     ) -> None:
         self.diagnosis = diagnosis
         self.planning = planning
@@ -276,11 +314,14 @@ class ProactiveTickService:
         self.drift_runner = drift_runner
         self.event_bus = event_bus
         self.plugin_manager = plugin_manager
+        self.repository = repository
+        self.now_fn = now_fn
         self._before_tick = Phase(
             [
                 *self.plugin_manager.phase_modules("proactive_before_tick_modules_early"),
                 _AssignTickIdModule(),
                 _LoadSnapshotModule(memory_store),
+                _LoadPolicyModule(repository),
                 _CollectSignalsModule(diagnosis, planning),
                 _EmitStartedModule(event_bus),
                 *self.plugin_manager.phase_modules("proactive_before_tick_modules_late"),
@@ -324,13 +365,15 @@ class ProactiveTickService:
         return self._run_async(self._after_tick.run(AfterTickInput(before_tick=before_tick, result=result)))
 
     def _decide(self, before_tick: ProactiveTickContext) -> ProactiveTickResult:
-        if not before_tick.force and not before_tick.latest_gaps and not before_tick.today_tasks:
+        lifecycle = [*before_tick.lifecycle, "ProactiveStateMachine"]
+        skip = self._pre_gate(before_tick)
+        if skip is not None:
             return ProactiveTickResult(
                 tick_id=before_tick.tick_id,
                 action="skip",
-                message="当前还没有足够的数据触发 proactive tick。",
+                message=skip,
                 current_jd_id=before_tick.current_jd_id,
-                lifecycle=[*before_tick.lifecycle, "ProactiveAfterTick"],
+                lifecycle=[*lifecycle, "ProactiveAfterTick"],
             )
 
         if before_tick.today_tasks:
@@ -344,7 +387,7 @@ class ProactiveTickService:
                 ),
                 current_jd_id=before_tick.current_jd_id,
                 generated_plan_id=before_tick.current_plan_id,
-                lifecycle=[*before_tick.lifecycle, "ProactiveAfterTick"],
+                lifecycle=[*lifecycle, "ProactiveAfterTick"],
             )
 
         if before_tick.latest_gaps:
@@ -365,7 +408,7 @@ class ProactiveTickService:
                 ),
                 current_jd_id=before_tick.current_jd_id,
                 generated_plan_id=generated.plan_id,
-                lifecycle=[*before_tick.lifecycle, "ProactiveAfterTick"],
+                lifecycle=[*lifecycle, "ProactiveAfterTick"],
             )
 
         drift = self._run_async(self._drift.run(DriftInput(before_tick=before_tick)))
@@ -375,8 +418,78 @@ class ProactiveTickService:
             message=drift.message,
             current_jd_id=before_tick.current_jd_id,
             drift_entered=True,
-            lifecycle=[*drift.lifecycle, "ProactiveAfterTick"],
+            lifecycle=[*lifecycle, *drift.lifecycle[1:], "ProactiveAfterTick"],
         )
+
+    def _pre_gate(self, before_tick: ProactiveTickContext) -> str | None:
+        if before_tick.force:
+            return None
+        if not before_tick.policy.proactive_enabled:
+            return "当前用户已关闭主动提醒。"
+        if not before_tick.latest_gaps and not before_tick.today_tasks:
+            return "当前还没有足够的数据触发 proactive tick。"
+
+        now = self.now_fn()
+        urgent = self._has_urgent_signal(before_tick)
+        if self._is_do_not_disturb(now.time(), before_tick.policy):
+            return "当前处于免打扰时间，暂不主动提醒。"
+        if not urgent and self._before_reminder_time(now.time(), before_tick.policy):
+            return "还没到今天的提醒时间，先不打扰你。"
+        if not urgent and self._hit_daily_cap(now, before_tick):
+            return "今天已经提醒过你一次了，先让你专注推进当前任务。"
+        if not urgent and self._in_cooldown(now, before_tick):
+            return "距离上次主动提醒还很近，先不重复打扰。"
+        return None
+
+    def _has_urgent_signal(self, before_tick: ProactiveTickContext) -> bool:
+        if before_tick.overall_risk == "high":
+            return True
+        if any(getattr(gap, "severity", "") == "high" for gap in before_tick.latest_gaps):
+            return True
+        if any(getattr(task, "priority", 99) <= 2 for task in before_tick.today_tasks):
+            return True
+        return False
+
+    def _is_do_not_disturb(self, now_time: time, policy: ProactivePolicy) -> bool:
+        start = self._parse_clock(policy.do_not_disturb_start, fallback=time(hour=23, minute=0))
+        end = self._parse_clock(policy.do_not_disturb_end, fallback=time(hour=8, minute=0))
+        if start <= end:
+            return start <= now_time < end
+        return now_time >= start or now_time < end
+
+    def _before_reminder_time(self, now_time: time, policy: ProactivePolicy) -> bool:
+        reminder_time = self._parse_clock(policy.reminder_time, fallback=time(hour=21, minute=0))
+        return now_time < reminder_time
+
+    def _hit_daily_cap(self, now: datetime, before_tick: ProactiveTickContext) -> bool:
+        if before_tick.policy.max_reminders_per_day <= 0:
+            return False
+        last_at = self._parse_timestamp(before_tick.memory_snapshot.working_memory.last_proactive_at)
+        if last_at is None:
+            return False
+        return last_at.date() == now.date()
+
+    def _in_cooldown(self, now: datetime, before_tick: ProactiveTickContext) -> bool:
+        last_at = self._parse_timestamp(before_tick.memory_snapshot.working_memory.last_proactive_at)
+        if last_at is None:
+            return False
+        delta = now - last_at
+        return delta.total_seconds() < before_tick.policy.cooldown_hours * 3600
+
+    def _parse_clock(self, raw: str, *, fallback: time) -> time:
+        try:
+            hour_text, minute_text = raw.split(":", 1)
+            return time(hour=int(hour_text), minute=int(minute_text))
+        except (ValueError, AttributeError):
+            return fallback
+
+    def _parse_timestamp(self, raw: str) -> datetime | None:
+        if not raw.strip():
+            return None
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            return None
 
     def _run_async(self, awaitable):
         import asyncio
