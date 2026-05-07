@@ -17,6 +17,8 @@ class AppSettings(BaseSettings):
     llm_base_url: str = Field(default="")
     llm_api_key: str = Field(default="")
     llm_chat_model: str = Field(default="gpt-4o-mini")
+    embedding_base_url: str = Field(default="")
+    embedding_api_key: str = Field(default="")
     llm_embedding_model: str = Field(default="text-embedding-3-small")
     embedding_dimensions: int = Field(default=64)
     text_chunk_size: int = Field(default=600)

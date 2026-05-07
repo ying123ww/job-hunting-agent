@@ -29,23 +29,36 @@ class OpenAICompatibleProvider:
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
-        if not self.settings.llm_base_url or not self.settings.llm_api_key:
+        embedding_base_url = self.settings.embedding_base_url.strip()
+        embedding_api_key = self.settings.embedding_api_key.strip()
+        if embedding_base_url or embedding_api_key:
+            if not embedding_base_url or not embedding_api_key:
+                raise ValueError(
+                    "INTERVIEW_AGENT_EMBEDDING_BASE_URL and "
+                    "INTERVIEW_AGENT_EMBEDDING_API_KEY must be set together."
+                )
+        else:
+            embedding_base_url = self.settings.llm_base_url.strip()
+            embedding_api_key = self.settings.llm_api_key.strip()
+        if not embedding_base_url or not embedding_api_key:
             return [
                 _hash_embedding(text, self.settings.embedding_dimensions)
                 for text in texts
             ]
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.settings.llm_embedding_model,
             "input": texts,
         }
+        if self.settings.embedding_dimensions > 0:
+            payload["dimensions"] = self.settings.embedding_dimensions
         headers = {
-            "Authorization": f"Bearer {self.settings.llm_api_key}",
+            "Authorization": f"Bearer {embedding_api_key}",
             "Content-Type": "application/json",
         }
         with httpx.Client(timeout=30.0) as client:
             response = client.post(
-                f"{self.settings.llm_base_url.rstrip('/')}/embeddings",
+                f"{embedding_base_url.rstrip('/')}/embeddings",
                 json=payload,
                 headers=headers,
             )
