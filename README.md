@@ -156,6 +156,22 @@ http://127.0.0.1:8000
 - `GET /plan/today`
 - `POST /plan/sync_ticktick`
 
+### Dida365 MCP
+
+要启用真实滴答同步，需要在 `.env` 里配置：
+
+```bash
+INTERVIEW_AGENT_DIDA365_ENABLED=true
+INTERVIEW_AGENT_DIDA365_ACCESS_TOKEN=your_access_token
+INTERVIEW_AGENT_DIDA365_PROJECT_ID=
+INTERVIEW_AGENT_DIDA365_PROJECT_NAME=Interview Copilot Agent
+INTERVIEW_AGENT_DIDA365_REGION=china
+INTERVIEW_AGENT_DIDA365_MCP_COMMAND=/home/ying/projects/job-hunting-agent/.venv/bin/dida365-mcp
+INTERVIEW_AGENT_DIDA365_MCP_ARGS=
+```
+
+如果没有 `PROJECT_ID`，系统会通过 MCP 的 `dida365_list_projects` 工具按 `PROJECT_NAME` 查找项目。
+
 ## 最小演示流程
 
 ### 1. 上传简历
@@ -219,7 +235,6 @@ curl http://127.0.0.1:8000/plan/today
 
 这版刻意收敛在 MVP，不做这些内容：
 
-- 真实 TickTick 联调
 - Telegram Bot
 - Web UI
 - 主动提醒状态机
@@ -239,12 +254,27 @@ curl http://127.0.0.1:8000/plan/today
 - 默认只做单用户演示
 - Chroma metadata 只放简单标量字段
 - 完整 metadata 和业务关系以 SQLite 为准
-- `POST /plan/sync_ticktick` 当前只做 dry-run，不会真的写第三方
+- 未配置 Dida365 MCP 时，`POST /plan/sync_ticktick` 会退回 `dry_run`
+- 配置 Dida365 MCP 后，agent 内部和 API 都会通过 MCP 调用真实滴答工具
+
+## Smoke Test
+
+如果你已经配置好 `.env`，可以直接运行：
+
+```bash
+.venv/bin/python scripts/smoke_sync_ticktick.py
+```
+
+这个脚本会：
+
+- 使用项目自己的 `AppContainer`
+- 读取 `.env` 和 `.venv/bin/dida365-mcp`
+- 如果当前默认用户还没有计划，就自动创建一个 demo task
+- 直接跑一遍 `planning.sync_ticktick()`
 
 ## 后续可扩展方向
 
 - 接真实 LLM 做更稳的评估、摘要和计划文案
-- 接真实 TickTick API
 - 加 `mock interview` 模式
 - 加主动提醒和动态重规划
 - 补 Web UI 或 Telegram 入口
