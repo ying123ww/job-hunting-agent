@@ -308,15 +308,15 @@ def sync_ticktick(request: SyncTickTickRequest) -> SyncTickTickResponse:
     container: AppContainer = app.state.container
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
-        tasks = container.planning.sync_ticktick(
+        summary = container.planning.sync_ticktick(
             session,
             user_id=user_id,
             plan_id=request.plan_id,
         )
         return SyncTickTickResponse(
-            synced=len(tasks),
-            mode="dry_run",
-            tasks=[_task_response(task) for task in tasks],
+            synced=summary.synced_count,
+            mode=summary.mode,
+            tasks=[_task_response(task) for task in summary.tasks],
         )
 
 

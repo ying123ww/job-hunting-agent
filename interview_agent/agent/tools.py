@@ -155,12 +155,12 @@ class SyncTickTickTool:
         self.planning = planning
 
     def run(self, ctx: ToolExecutionContext, arguments: dict[str, Any]) -> ToolResult:
-        tasks = self.planning.sync_ticktick(ctx.session, user_id=ctx.user_id, plan_id=arguments.get("plan_id"))
+        summary = self.planning.sync_ticktick(ctx.session, user_id=ctx.user_id, plan_id=arguments.get("plan_id"))
         return ToolResult(
             tool_name=self.name,
             status="ok",
-            payload={"tasks": tasks},
-            preview=f"synced {len(tasks)} tasks",
+            payload={"tasks": summary.tasks, "mode": summary.mode, "synced_count": summary.synced_count},
+            preview=f"synced {summary.synced_count} tasks via {summary.mode}",
         )
 
 

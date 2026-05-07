@@ -121,7 +121,7 @@ class SyncTickTickRequest(BaseModel):
 
 class SyncTickTickResponse(BaseModel):
     synced: int
-    mode: Literal["dry_run"]
+    mode: Literal["dry_run", "live"]
     tasks: list[TaskResponse]
 
 

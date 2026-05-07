@@ -242,8 +242,9 @@ class AgentReasoner:
                 reply="这次 TickTick dry-run 同步没有成功完成。",
                 tool_results=tool_results,
             )
-        count = len(sync_result.payload["tasks"])
-        reply = f"已经完成一次 TickTick dry-run 同步，共处理 {count} 个任务。"
+        count = int(sync_result.payload.get("synced_count", len(sync_result.payload["tasks"])))
+        mode = str(sync_result.payload.get("mode", "dry_run"))
+        reply = f"已经完成一次 TickTick {mode} 同步，共处理 {count} 个任务。"
         return AgentTurnDecision(intent="sync", reply=reply, tool_results=tool_results)
 
     def _qa_decision(

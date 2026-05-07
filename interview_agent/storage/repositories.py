@@ -389,6 +389,24 @@ class InterviewRepository:
         session.flush()
         return task
 
+    def update_task_sync_state(
+        self,
+        session: Session,
+        *,
+        task_id: str,
+        ticktick_id: str | None = None,
+        status: str | None = None,
+    ) -> Task | None:
+        task = session.get(Task, task_id)
+        if task is None:
+            return None
+        if ticktick_id is not None:
+            task.ticktick_id = ticktick_id
+        if status is not None:
+            task.status = status
+        session.flush()
+        return task
+
     def list_tasks_for_day(self, session: Session, *, user_id: str, day: date) -> list[Task]:
         stmt = (
             select(Task)

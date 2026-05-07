@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta
 
 from sqlalchemy.orm import Session
 
-from interview_agent.actions.ticktick import StubTickTickClient
+from interview_agent.actions.ticktick import TickTickClient, TickTickSyncTask
 from interview_agent.diagnosis.service import DiagnosedGap, GapAnalysisService
 from interview_agent.storage.repositories import InterviewRepository
 
@@ -30,13 +30,20 @@ class GeneratedPlan:
     tasks: list[PlannedTask]
 
 
+@dataclass(slots=True)
+class TickTickSyncSummary:
+    mode: str
+    synced_count: int
+    tasks: list[PlannedTask]
+
+
 class PlanService:
     def __init__(
         self,
         *,
         repository: InterviewRepository,
         diagnosis: GapAnalysisService,
-        ticktick: StubTickTickClient,
+        ticktick: TickTickClient,
     ) -> None:
         self.repository = repository
         self.diagnosis = diagnosis
@@ -128,12 +135,23 @@ class PlanService:
             ],
         )
 
-    def sync_ticktick(self, session: Session, *, user_id: str, plan_id: str | None) -> list[PlannedTask]:
+    def sync_ticktick(self, session: Session, *, user_id: str, plan_id: str | None) -> TickTickSyncSummary:
         plan = self.repository.latest_plan(session, user_id=user_id) if plan_id is None else None
         target_plan_id = plan_id or (plan.id if plan else None)
         if target_plan_id is None:
-            return []
+            return TickTickSyncSummary(mode="dry_run", synced_count=0, tasks=[])
         tasks = self.repository.tasks_for_plan(session, plan_id=target_plan_id)
+        sync_result = self.ticktick.sync([self._to_sync_task(item) for item in tasks])
+        synced_lookup = {item.local_task_id: item for item in sync_result.synced_tasks}
+        for item in tasks:
+            synced = synced_lookup.get(item.id)
+            if synced is None:
+                continue
+            self.repository.update_task_sync_state(
+                session,
+                task_id=item.id,
+                ticktick_id=synced.remote_task_id,
+            )
         planned = [
             PlannedTask(
                 task_id=item.id,
@@ -147,8 +165,11 @@ class PlanService:
             )
             for item in tasks
         ]
-        self.ticktick.sync(planned)
-        return planned
+        return TickTickSyncSummary(
+            mode=sync_result.mode,
+            synced_count=sync_result.synced_count,
+            tasks=planned,
+        )
 
     def _tasks_for_gap(self, gap: DiagnosedGap) -> list[tuple[str, int, int]]:
         priority = 2 if gap.severity == "high" else 3 if gap.severity == "medium" else 4
@@ -158,3 +179,13 @@ class PlanService:
             (first_action, 25, priority),
             (second_action, 10, priority),
         ]
+
+    def _to_sync_task(self, task) -> TickTickSyncTask:
+        return TickTickSyncTask(
+            local_task_id=task.id,
+            title=task.title,
+            content=f"{task.reason}\n预计耗时：{task.duration_min} 分钟",
+            due_at=task.due_at,
+            priority=task.priority,
+            ticktick_id=task.ticktick_id,
+        )

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from interview_agent.actions.ticktick import StubTickTickClient
+from interview_agent.actions.ticktick import TickTickClient, build_ticktick_client
 from interview_agent.agent.context import AgentContextBuilder
 from interview_agent.agent.event_bus import EventBus
 from interview_agent.agent.lifecycle import TurnLifecycle
@@ -47,7 +47,7 @@ class AppContainer:
     retrieval: RetrievalService
     diagnosis: GapAnalysisService
     planning: PlanService
-    ticktick: StubTickTickClient
+    ticktick: TickTickClient
     agent_event_bus: EventBus
     agent_memory: AgentMemoryStore
     agent_context: AgentContextBuilder
@@ -81,7 +81,7 @@ class AppContainer:
             retrieval=retrieval,
             vector_store=vector_store,
         )
-        ticktick = StubTickTickClient()
+        ticktick = build_ticktick_client(settings)
         planning = PlanService(
             repository=repository,
             diagnosis=diagnosis,
