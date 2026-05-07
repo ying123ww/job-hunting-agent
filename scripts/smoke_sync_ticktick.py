@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import argparse
+import os
 from datetime import date, datetime, time
+from pathlib import Path
 
 from interview_agent.app.config import get_settings
 from interview_agent.core.container import AppContainer
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Run a TickTick/Dida smoke sync against a target workspace.")
+    parser.add_argument("--workspace", type=Path, default=None, help="Override INTERVIEW_AGENT_WORKSPACE_DIR.")
+    args = parser.parse_args()
+
+    if args.workspace is not None:
+        os.environ["INTERVIEW_AGENT_WORKSPACE_DIR"] = str(args.workspace)
+
+    get_settings.cache_clear()
     settings = get_settings()
     container = AppContainer.build(settings)
     user_id = settings.default_user_id

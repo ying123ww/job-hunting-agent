@@ -61,7 +61,7 @@ class AppContainer:
 
     @classmethod
     def build(cls, settings: AppSettings) -> "AppContainer":
-        db = DatabaseManager(settings.database_url)
+        db = DatabaseManager(settings.resolved_database_url)
         provider = OpenAICompatibleProvider(settings=settings)
         vector_store = ChromaVectorStore(settings, provider)
         repository = InterviewRepository()

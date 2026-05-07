@@ -11,9 +11,10 @@ class AppSettings(BaseSettings):
     app_name: str = Field(default="Interview Copilot Agent")
     env: str = Field(default="dev")
     default_user_id: str = Field(default="u_demo")
-    database_url: str = Field(default="sqlite:///./.data/app.db")
-    chroma_dir: str = Field(default="./.data/chroma")
-    memory_dir: str = Field(default="./memory")
+    workspace_dir: str = Field(default="./workspace")
+    database_url: str = Field(default="")
+    chroma_dir: str = Field(default="")
+    memory_dir: str = Field(default="")
     llm_base_url: str = Field(default="")
     llm_api_key: str = Field(default="")
     llm_chat_model: str = Field(default="gpt-4o-mini")
@@ -50,19 +51,41 @@ class AppSettings(BaseSettings):
     )
 
     @property
+    def workspace_path(self) -> Path:
+        return Path(self.workspace_dir).resolve()
+
+    @property
+    def resolved_database_url(self) -> str:
+        raw = self.database_url.strip()
+        if raw == "":
+            return f"sqlite:///{(self.workspace_path / 'app.db').resolve()}"
+        prefix = "sqlite:///"
+        if raw.startswith(prefix):
+            sqlite_path = Path(raw.removeprefix(prefix))
+            return f"sqlite:///{sqlite_path.resolve()}"
+        return raw
+
+    @property
     def chroma_path(self) -> Path:
-        return Path(self.chroma_dir).resolve()
+        raw = self.chroma_dir.strip()
+        if raw == "":
+            return (self.workspace_path / "chroma").resolve()
+        return Path(raw).resolve()
 
     @property
     def memory_path(self) -> Path:
-        return Path(self.memory_dir).resolve()
+        raw = self.memory_dir.strip()
+        if raw == "":
+            return (self.workspace_path / "memory").resolve()
+        return Path(raw).resolve()
 
     @property
     def sqlite_path(self) -> Path | None:
         prefix = "sqlite:///"
-        if not self.database_url.startswith(prefix):
+        database_url = self.resolved_database_url
+        if not database_url.startswith(prefix):
             return None
-        return Path(self.database_url.removeprefix(prefix)).resolve()
+        return Path(database_url.removeprefix(prefix)).resolve()
 
     @property
     def telegram_allowed_chat_id_set(self) -> set[int]:
@@ -85,6 +108,7 @@ class AppSettings(BaseSettings):
         return values
 
     def ensure_data_dirs(self) -> None:
+        self.workspace_path.mkdir(parents=True, exist_ok=True)
         self.chroma_path.mkdir(parents=True, exist_ok=True)
         self.memory_path.mkdir(parents=True, exist_ok=True)
         if self.sqlite_path is not None:

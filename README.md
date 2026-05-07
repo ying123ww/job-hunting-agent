@@ -103,15 +103,60 @@ cp .env.example .env
 
 关键项：
 
+- `INTERVIEW_AGENT_WORKSPACE_DIR`
 - `INTERVIEW_AGENT_DATABASE_URL`
 - `INTERVIEW_AGENT_CHROMA_DIR`
 - `INTERVIEW_AGENT_LLM_BASE_URL`
 - `INTERVIEW_AGENT_LLM_API_KEY`
 
+### Workspace 模式
+
+现在默认支持一个统一的 runtime workspace 概念：
+
+- `memory/`
+- `app.db`
+- `chroma/`
+
+都会默认挂在 `INTERVIEW_AGENT_WORKSPACE_DIR` 下。
+
+例如：
+
+```bash
+.venv/bin/python scripts/init_workspace.py --workspace ./workspaces/smoke-001
+```
+
+这个 workspace 下会初始化：
+
+- `memory/MEMORY.md`
+- `memory/SELF.md`
+- `memory/HISTORY.md`
+- `memory/RECENT_CONTEXT.md`
+- `memory/PENDING.md`
+- `memory/NOW.md`
+- `memory/WORKING_MEMORY.json`
+- `app.db`
+- `chroma/`
+
+默认 `init` 只创建缺失内容，不覆盖已有数据。
+
+如果你想重写 workspace 模板文件，但保留 `app.db` 和 `chroma` 里的历史数据，可以运行：
+
+```bash
+.venv/bin/python scripts/init_workspace.py --workspace ./workspaces/smoke-001 --force
+```
+
+如果你想把某个 workspace 重置成“第一次启动”的状态，可以运行：
+
+```bash
+.venv/bin/python scripts/reset_workspace.py --workspace ./workspaces/smoke-001
+```
+
+这样你就可以为每次 smoke test、回归测试、演示环境切换到全新的 workspace，而不是手动删除本地运行目录。
+
 ### 3. 启动服务
 
 ```bash
-.venv/bin/python -m uvicorn interview_agent.app.main:app --reload
+.venv/bin/python scripts/run_api.py --workspace ./workspaces/smoke-001 --reload
 ```
 
 启动后默认地址：
@@ -263,7 +308,7 @@ curl http://127.0.0.1:8000/plan/today
 如果你已经配置好 `.env`，可以直接运行：
 
 ```bash
-.venv/bin/python scripts/smoke_sync_ticktick.py
+.venv/bin/python scripts/smoke_sync_ticktick.py --workspace ./workspaces/smoke-001
 ```
 
 这个脚本会：
@@ -278,7 +323,7 @@ curl http://127.0.0.1:8000/plan/today
 这版已经可以直接接 Telegram Bot，入口脚本是：
 
 ```bash
-.venv/bin/python scripts/run_telegram_bot.py
+.venv/bin/python scripts/run_telegram_bot.py --workspace ./workspaces/tg-demo
 ```
 
 需要先在 `.env` 里配置：
@@ -308,7 +353,7 @@ INTERVIEW_AGENT_TELEGRAM_ALLOWED_CHAT_IDS=
 这版还加了一个基于官方 QQBot API 的私聊通道，入口脚本是：
 
 ```bash
-.venv/bin/python scripts/run_qq_bot.py
+.venv/bin/python scripts/run_qq_bot.py --workspace ./workspaces/qq-demo
 ```
 
 需要先在 `.env` 里配置：
