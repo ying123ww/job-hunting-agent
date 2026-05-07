@@ -273,9 +273,37 @@ curl http://127.0.0.1:8000/plan/today
 - 如果当前默认用户还没有计划，就自动创建一个 demo task
 - 直接跑一遍 `planning.sync_ticktick()`
 
+## Telegram Bot
+
+这版已经可以直接接 Telegram Bot，入口脚本是：
+
+```bash
+.venv/bin/python scripts/run_telegram_bot.py
+```
+
+需要先在 `.env` 里配置：
+
+```bash
+INTERVIEW_AGENT_TELEGRAM_BOT_TOKEN=your_bot_token
+INTERVIEW_AGENT_TELEGRAM_API_BASE_URL=https://api.telegram.org
+INTERVIEW_AGENT_TELEGRAM_POLL_TIMEOUT_SEC=30
+INTERVIEW_AGENT_TELEGRAM_POLL_MAX_BACKOFF_SEC=30
+INTERVIEW_AGENT_TELEGRAM_DROP_PENDING_UPDATES=true
+```
+
+运行后脚本会通过 long polling 拉取消息，并直接调用项目里的 `agent_runtime`。
+
+当前行为：
+
+- 每个 Telegram `chat_id` 会映射为本地 `user_id=tg_<chat_id>`
+- 文本消息会直接进入 agent 对话链路
+- `/start` 会返回一条欢迎消息
+- 启动时默认会跳过历史积压 update，避免 bot 重启后把旧消息重新吃一遍
+- 轮询网络异常会指数退避重试；如果遇到 `getUpdates` 冲突会停止接收并保留日志
+
 ## 后续可扩展方向
 
 - 接真实 LLM 做更稳的评估、摘要和计划文案
 - 加 `mock interview` 模式
 - 加主动提醒和动态重规划
-- 补 Web UI 或 Telegram 入口
+- 补 Web UI

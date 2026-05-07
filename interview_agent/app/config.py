@@ -28,6 +28,11 @@ class AppSettings(BaseSettings):
     dida365_region: str = Field(default="china")
     dida365_mcp_command: str = Field(default="uvx")
     dida365_mcp_args: str = Field(default="dida365-agent-mcp")
+    telegram_bot_token: str = Field(default="")
+    telegram_api_base_url: str = Field(default="https://api.telegram.org")
+    telegram_poll_timeout_sec: int = Field(default=30)
+    telegram_poll_max_backoff_sec: int = Field(default=30)
+    telegram_drop_pending_updates: bool = Field(default=True)
 
     model_config = SettingsConfigDict(
         env_prefix="INTERVIEW_AGENT_",
