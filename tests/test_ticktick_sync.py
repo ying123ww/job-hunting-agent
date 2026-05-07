@@ -1,10 +1,8 @@
 from datetime import date, datetime
 
-import httpx
-
 from interview_agent.actions.ticktick import (
-    Dida365Config,
-    Dida365TickTickClient,
+    Dida365McpConfig,
+    Dida365McpTickTickClient,
     TickTickSyncResult,
     TickTickSyncTask,
     TickTickSyncedTask,
@@ -14,65 +12,110 @@ from interview_agent.storage.database import DatabaseManager
 from interview_agent.storage.repositories import InterviewRepository
 
 
-def test_dida365_client_creates_and_updates_tasks() -> None:
-    calls: list[tuple[str, str, object | None]] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = None
-        if request.content:
-            payload = request.read().decode("utf-8")
-        calls.append((request.method, request.url.path, payload))
-        if request.method == "GET" and request.url.path == "/open/v1/project":
-            return httpx.Response(200, json=[{"id": "proj_interview", "name": "Interview Copilot Agent"}])
-        if request.method == "POST" and request.url.path == "/open/v1/task":
-            return httpx.Response(200, json={"id": "remote_created"})
-        if request.method == "POST" and request.url.path == "/open/v1/task/remote_existing":
-            return httpx.Response(200, json={"id": "remote_existing"})
-        raise AssertionError(f"unexpected request: {request.method} {request.url}")
-
-    transport = httpx.MockTransport(handler)
-    client = Dida365TickTickClient(
-        config=Dida365Config(
-            access_token="token",
-            project_id="",
+def test_dida365_mcp_client_builds_arguments_from_tool_schema() -> None:
+    client = Dida365McpTickTickClient(
+        config=Dida365McpConfig(
+            command="uvx",
+            args=["dida365-agent-mcp"],
+            env={},
+            project_id="proj_interview",
             project_name="Interview Copilot Agent",
-            base_url="https://api.dida365.com/open/v1",
+        )
+    )
+    create_tool = type(
+        "Tool",
+        (),
+        {
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "projectId": {},
+                    "title": {},
+                    "content": {},
+                    "dueDate": {},
+                    "priority": {},
+                },
+            }
+        },
+    )()
+    update_tool = type(
+        "Tool",
+        (),
+        {
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "taskId": {},
+                    "projectId": {},
+                    "title": {},
+                    "content": {},
+                    "dueDate": {},
+                    "priority": {},
+                },
+            }
+        },
+    )()
+
+    create_args = client._build_task_arguments(  # type: ignore[attr-defined]
+        tool=create_tool,
+        task=TickTickSyncTask(
+            local_task_id="task_local_1",
+            title="复习 Redis",
+            content="补齐 epoll 机制",
+            due_at=datetime(2026, 5, 7, 21, 0),
+            priority=3,
         ),
-        client_factory=lambda: httpx.Client(
-            transport=transport,
-            base_url="https://api.dida365.com/open/v1",
-            headers={"Authorization": "Bearer token"},
+        project_id="proj_interview",
+        for_update=False,
+    )
+    update_args = client._build_task_arguments(  # type: ignore[attr-defined]
+        tool=update_tool,
+        task=TickTickSyncTask(
+            local_task_id="task_local_2",
+            title="重做系统设计",
+            content="补 QPS 估算",
+            due_at=datetime(2026, 5, 7, 22, 0),
+            priority=2,
+            ticktick_id="remote_existing",
         ),
+        project_id="proj_interview",
+        for_update=True,
     )
 
-    result = client.sync(
-        [
-            TickTickSyncTask(
-                local_task_id="task_local_1",
-                title="复习 Redis",
-                content="补齐 epoll 机制",
-                due_at=datetime(2026, 5, 7, 21, 0),
-                priority=3,
-            ),
-            TickTickSyncTask(
-                local_task_id="task_local_2",
-                title="重做系统设计",
-                content="补 QPS 估算",
-                due_at=datetime(2026, 5, 7, 22, 0),
-                priority=2,
-                ticktick_id="remote_existing",
-            ),
-        ]
-    )
+    assert create_args["projectId"] == "proj_interview"
+    assert create_args["title"] == "复习 Redis"
+    assert create_args["content"] == "补齐 epoll 机制"
+    assert create_args["priority"] == 3
+    assert "dueDate" in create_args
+    assert update_args["taskId"] == "remote_existing"
+    assert update_args["projectId"] == "proj_interview"
 
-    assert result.mode == "live"
-    assert result.synced_count == 2
-    assert [item.remote_task_id for item in result.synced_tasks] == ["remote_created", "remote_existing"]
-    assert [item[:2] for item in calls] == [
-        ("GET", "/open/v1/project"),
-        ("POST", "/open/v1/task"),
-        ("POST", "/open/v1/task/remote_existing"),
-    ]
+
+def test_dida365_mcp_client_extracts_remote_task_id() -> None:
+    client = Dida365McpTickTickClient(
+        config=Dida365McpConfig(
+            command="uvx",
+            args=["dida365-agent-mcp"],
+            env={},
+            project_id="proj_interview",
+            project_name="Interview Copilot Agent",
+        )
+    )
+    result = type(
+        "CallResult",
+        (),
+        {
+            "structuredContent": {
+                "task": {
+                    "id": "remote_created",
+                }
+            }
+        },
+    )()
+
+    remote_task_id = client._extract_remote_task_id(result, fallback="")  # type: ignore[attr-defined]
+
+    assert remote_task_id == "remote_created"
 
 
 def test_plan_service_sync_updates_local_ticktick_ids(tmp_path) -> None:

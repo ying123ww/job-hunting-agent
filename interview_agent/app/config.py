@@ -26,7 +26,8 @@ class AppSettings(BaseSettings):
     dida365_project_id: str = Field(default="")
     dida365_project_name: str = Field(default="Interview Copilot Agent")
     dida365_region: str = Field(default="china")
-    dida365_timeout_seconds: float = Field(default=15.0)
+    dida365_mcp_command: str = Field(default="uvx")
+    dida365_mcp_args: str = Field(default="dida365-agent-mcp")
 
     model_config = SettingsConfigDict(
         env_prefix="INTERVIEW_AGENT_",
@@ -54,14 +55,6 @@ class AppSettings(BaseSettings):
         self.memory_path.mkdir(parents=True, exist_ok=True)
         if self.sqlite_path is not None:
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
-
-    @property
-    def dida365_base_url(self) -> str:
-        region = self.dida365_region.strip().lower()
-        if region in {"global", "intl", "international", "ticktick"}:
-            return "https://api.ticktick.com/open/v1"
-        return "https://api.dida365.com/open/v1"
-
 
 @lru_cache(maxsize=1)
 def get_settings() -> AppSettings:
