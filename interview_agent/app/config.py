@@ -34,6 +34,12 @@ class AppSettings(BaseSettings):
     telegram_poll_max_backoff_sec: int = Field(default=30)
     telegram_drop_pending_updates: bool = Field(default=True)
     telegram_allowed_chat_ids: str = Field(default="")
+    qqbot_app_id: str = Field(default="")
+    qqbot_client_secret: str = Field(default="")
+    qqbot_api_base_url: str = Field(default="https://api.sgroup.qq.com")
+    qqbot_token_url: str = Field(default="https://bots.qq.com/app/getAppAccessToken")
+    qqbot_gateway_backoff_sec: int = Field(default=5)
+    qqbot_allowed_openids: str = Field(default="")
 
     model_config = SettingsConfigDict(
         env_prefix="INTERVIEW_AGENT_",
@@ -64,6 +70,16 @@ class AppSettings(BaseSettings):
             if not item:
                 continue
             values.add(int(item))
+        return values
+
+    @property
+    def qqbot_allowed_openid_set(self) -> set[str]:
+        values: set[str] = set()
+        for raw in self.qqbot_allowed_openids.split(","):
+            item = raw.strip()
+            if not item:
+                continue
+            values.add(item)
         return values
 
     def ensure_data_dirs(self) -> None:

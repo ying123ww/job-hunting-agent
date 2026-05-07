@@ -303,6 +303,32 @@ INTERVIEW_AGENT_TELEGRAM_ALLOWED_CHAT_IDS=
 - 轮询网络异常会指数退避重试；如果遇到 `getUpdates` 冲突会停止接收并保留日志
 - 如果配置了 `INTERVIEW_AGENT_TELEGRAM_ALLOWED_CHAT_IDS`，只有白名单里的 chat_id 会被处理
 
+## QQ Bot
+
+这版还加了一个基于官方 QQBot API 的私聊通道，入口脚本是：
+
+```bash
+.venv/bin/python scripts/run_qq_bot.py
+```
+
+需要先在 `.env` 里配置：
+
+```bash
+INTERVIEW_AGENT_QQBOT_APP_ID=your_app_id
+INTERVIEW_AGENT_QQBOT_CLIENT_SECRET=your_client_secret
+INTERVIEW_AGENT_QQBOT_API_BASE_URL=https://api.sgroup.qq.com
+INTERVIEW_AGENT_QQBOT_TOKEN_URL=https://bots.qq.com/app/getAppAccessToken
+INTERVIEW_AGENT_QQBOT_GATEWAY_BACKOFF_SEC=5
+INTERVIEW_AGENT_QQBOT_ALLOWED_OPENIDS=
+```
+
+当前行为：
+
+- 只支持官方 QQBot 的 `C2C` 私聊文本消息
+- 通过 WebSocket gateway 接收入站消息，通过 REST API 发回回复
+- 每个 `user_openid` 会映射为本地 `user_id=qqbot_<openid>`
+- 如果配置了 `INTERVIEW_AGENT_QQBOT_ALLOWED_OPENIDS`，只有白名单里的 openid 会被处理
+
 ## 后续可扩展方向
 
 - 接真实 LLM 做更稳的评估、摘要和计划文案
