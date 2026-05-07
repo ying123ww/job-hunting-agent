@@ -289,6 +289,7 @@ INTERVIEW_AGENT_TELEGRAM_API_BASE_URL=https://api.telegram.org
 INTERVIEW_AGENT_TELEGRAM_POLL_TIMEOUT_SEC=30
 INTERVIEW_AGENT_TELEGRAM_POLL_MAX_BACKOFF_SEC=30
 INTERVIEW_AGENT_TELEGRAM_DROP_PENDING_UPDATES=true
+INTERVIEW_AGENT_TELEGRAM_ALLOWED_CHAT_IDS=
 ```
 
 运行后脚本会通过 long polling 拉取消息，并直接调用项目里的 `agent_runtime`。
@@ -300,6 +301,7 @@ INTERVIEW_AGENT_TELEGRAM_DROP_PENDING_UPDATES=true
 - `/start` 会返回一条欢迎消息
 - 启动时默认会跳过历史积压 update，避免 bot 重启后把旧消息重新吃一遍
 - 轮询网络异常会指数退避重试；如果遇到 `getUpdates` 冲突会停止接收并保留日志
+- 如果配置了 `INTERVIEW_AGENT_TELEGRAM_ALLOWED_CHAT_IDS`，只有白名单里的 chat_id 会被处理
 
 ## 后续可扩展方向
 

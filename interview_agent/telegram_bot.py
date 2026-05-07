@@ -161,8 +161,16 @@ class TelegramBotService:
         self.container = container
         self.client = client
         self.settings = settings
+        self.allowed_chat_ids = self._load_allowed_chat_ids(settings)
 
     async def handle_message(self, message: TelegramMessage) -> None:
+        if not self.is_allowed_chat(message.chat_id):
+            logger.warning(
+                "Ignored Telegram message from unauthorized chat_id=%s update_id=%s",
+                message.chat_id,
+                message.update_id,
+            )
+            return
         text = message.text.strip()
         if not text:
             return
@@ -306,3 +314,21 @@ class TelegramBotService:
 
     def _user_id(self, chat_id: int) -> str:
         return f"tg_{chat_id}"
+
+    def is_allowed_chat(self, chat_id: int) -> bool:
+        if not self.allowed_chat_ids:
+            return True
+        return chat_id in self.allowed_chat_ids
+
+    def _load_allowed_chat_ids(self, settings: AppSettings) -> set[int]:
+        value = getattr(settings, "telegram_allowed_chat_id_set", None)
+        if value is not None:
+            return set(value)
+        raw = str(getattr(settings, "telegram_allowed_chat_ids", "") or "")
+        allowed: set[int] = set()
+        for item in raw.split(","):
+            stripped = item.strip()
+            if not stripped:
+                continue
+            allowed.add(int(stripped))
+        return allowed

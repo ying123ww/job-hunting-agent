@@ -33,6 +33,7 @@ class AppSettings(BaseSettings):
     telegram_poll_timeout_sec: int = Field(default=30)
     telegram_poll_max_backoff_sec: int = Field(default=30)
     telegram_drop_pending_updates: bool = Field(default=True)
+    telegram_allowed_chat_ids: str = Field(default="")
 
     model_config = SettingsConfigDict(
         env_prefix="INTERVIEW_AGENT_",
@@ -54,6 +55,16 @@ class AppSettings(BaseSettings):
         if not self.database_url.startswith(prefix):
             return None
         return Path(self.database_url.removeprefix(prefix)).resolve()
+
+    @property
+    def telegram_allowed_chat_id_set(self) -> set[int]:
+        values: set[int] = set()
+        for raw in self.telegram_allowed_chat_ids.split(","):
+            item = raw.strip()
+            if not item:
+                continue
+            values.add(int(item))
+        return values
 
     def ensure_data_dirs(self) -> None:
         self.chroma_path.mkdir(parents=True, exist_ok=True)

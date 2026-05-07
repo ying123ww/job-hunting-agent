@@ -55,6 +55,7 @@ def test_telegram_bot_handles_text_message() -> None:
             telegram_poll_timeout_sec=30,
             telegram_poll_max_backoff_sec=30,
             telegram_drop_pending_updates=True,
+            telegram_allowed_chat_ids="",
         ),
     )
 
@@ -86,6 +87,7 @@ def test_telegram_bot_ignores_non_text_message() -> None:
             telegram_poll_timeout_sec=30,
             telegram_poll_max_backoff_sec=30,
             telegram_drop_pending_updates=True,
+            telegram_allowed_chat_ids="",
         ),
     )
 
@@ -113,6 +115,7 @@ def test_telegram_bot_bootstrap_offset_drops_pending_updates() -> None:
             telegram_poll_timeout_sec=30,
             telegram_poll_max_backoff_sec=30,
             telegram_drop_pending_updates=True,
+            telegram_allowed_chat_ids="",
         ),
     )
 
@@ -131,6 +134,7 @@ def test_process_updates_continues_after_single_message_failure() -> None:
             telegram_poll_timeout_sec=30,
             telegram_poll_max_backoff_sec=30,
             telegram_drop_pending_updates=True,
+            telegram_allowed_chat_ids="",
         ),
     )
 
@@ -164,3 +168,66 @@ def test_split_message_breaks_long_text() -> None:
     assert len(parts) == 2
     assert parts[0] == "a" * 2500
     assert parts[1] == "b" * 2500
+
+
+def test_telegram_bot_blocks_chat_not_in_allowlist() -> None:
+    client = FakeTelegramClient()
+    runtime = FakeAgentRuntime()
+    container = SimpleNamespace(db=FakeDB(), agent_runtime=runtime)
+    service = TelegramBotService(
+        container=container,
+        client=client,
+        settings=SimpleNamespace(
+            telegram_poll_timeout_sec=30,
+            telegram_poll_max_backoff_sec=30,
+            telegram_drop_pending_updates=True,
+            telegram_allowed_chat_ids="999",
+        ),
+    )
+
+    message = service.extract_message(
+        {
+            "update_id": 123,
+            "message": {
+                "text": "今天我该准备什么？",
+                "chat": {"id": 456},
+            },
+        }
+    )
+
+    assert message is not None
+    asyncio.run(service.handle_message(message))
+
+    assert runtime.calls == []
+    assert client.messages == []
+
+
+def test_telegram_bot_allows_chat_in_allowlist() -> None:
+    client = FakeTelegramClient()
+    runtime = FakeAgentRuntime()
+    container = SimpleNamespace(db=FakeDB(), agent_runtime=runtime)
+    service = TelegramBotService(
+        container=container,
+        client=client,
+        settings=SimpleNamespace(
+            telegram_poll_timeout_sec=30,
+            telegram_poll_max_backoff_sec=30,
+            telegram_drop_pending_updates=True,
+            telegram_allowed_chat_ids="456,999",
+        ),
+    )
+
+    message = service.extract_message(
+        {
+            "update_id": 123,
+            "message": {
+                "text": "今天我该准备什么？",
+                "chat": {"id": 456},
+            },
+        }
+    )
+
+    assert message is not None
+    asyncio.run(service.handle_message(message))
+
+    assert runtime.calls == [("tg_456", "今天我该准备什么？", None)]
