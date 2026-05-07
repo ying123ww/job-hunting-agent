@@ -141,7 +141,8 @@ class PlanService:
         if target_plan_id is None:
             return TickTickSyncSummary(mode="dry_run", synced_count=0, tasks=[])
         tasks = self.repository.tasks_for_plan(session, plan_id=target_plan_id)
-        sync_result = self.ticktick.sync([self._to_sync_task(item) for item in tasks])
+        sync_tasks = [self._to_sync_task(item) for item in tasks]
+        sync_result = self.ticktick.sync(sync_tasks)
         synced_lookup = {item.local_task_id: item for item in sync_result.synced_tasks}
         for item in tasks:
             synced = synced_lookup.get(item.id)
@@ -151,6 +152,17 @@ class PlanService:
                 session,
                 task_id=item.id,
                 ticktick_id=synced.remote_task_id,
+            )
+        refreshed_tasks = self.repository.tasks_for_plan(session, plan_id=target_plan_id)
+        status_map = self.ticktick.fetch_statuses([self._to_sync_task(item) for item in refreshed_tasks])
+        for item in refreshed_tasks:
+            status = status_map.get(item.id)
+            if status is None:
+                continue
+            self.repository.update_task_sync_state(
+                session,
+                task_id=item.id,
+                status=status,
             )
         planned = [
             PlannedTask(

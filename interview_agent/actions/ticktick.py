@@ -6,7 +6,7 @@ import os
 import re
 import shlex
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Literal, Protocol, Sequence
 
 from interview_agent.app.config import AppSettings
@@ -44,6 +44,9 @@ class TickTickClient(Protocol):
     def sync(self, tasks: Sequence[TickTickSyncTask]) -> TickTickSyncResult:
         ...
 
+    def fetch_statuses(self, tasks: Sequence[TickTickSyncTask]) -> dict[str, str]:
+        ...
+
 
 @dataclass(slots=True)
 class StubTickTickClient:
@@ -72,6 +75,9 @@ class StubTickTickClient:
             synced_tasks=synced_tasks,
         )
 
+    def fetch_statuses(self, tasks: Sequence[TickTickSyncTask]) -> dict[str, str]:
+        return {}
+
 
 @dataclass(slots=True)
 class Dida365McpConfig:
@@ -90,6 +96,12 @@ class Dida365McpTickTickClient:
         if not tasks:
             return TickTickSyncResult(mode="live", synced_count=0, synced_tasks=[])
         return asyncio.run(self._sync_async(tasks))
+
+    def fetch_statuses(self, tasks: Sequence[TickTickSyncTask]) -> dict[str, str]:
+        tracked = [task for task in tasks if task.ticktick_id]
+        if not tracked:
+            return {}
+        return asyncio.run(self._fetch_statuses_async(tracked))
 
     async def _sync_async(self, tasks: Sequence[TickTickSyncTask]) -> TickTickSyncResult:
         try:
@@ -131,6 +143,41 @@ class Dida365McpTickTickClient:
                     synced_count=len(synced_tasks),
                     synced_tasks=synced_tasks,
                 )
+
+    async def _fetch_statuses_async(self, tasks: Sequence[TickTickSyncTask]) -> dict[str, str]:
+        try:
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+        except ImportError as exc:
+            raise RuntimeError(
+                "MCP client dependency is missing. Add `mcp` to the environment before enabling Dida365 MCP sync."
+            ) from exc
+
+        server_params = StdioServerParameters(
+            command=self.config.command,
+            args=self.config.args,
+            env=self.config.env,
+        )
+
+        async with stdio_client(server_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools_response = await session.list_tools()
+                tools = {tool.name: tool for tool in tools_response.tools}
+                project_id = await self._resolve_project_id(session, tools)
+                undone_ids = await self._list_undone_task_ids(session, tools, project_id)
+                completed_ids = await self._list_completed_task_ids(session, tools, tasks, project_id)
+
+        statuses: dict[str, str] = {}
+        for task in tasks:
+            remote_id = task.ticktick_id or ""
+            if not remote_id:
+                continue
+            if remote_id in completed_ids:
+                statuses[task.local_task_id] = "completed"
+            elif remote_id in undone_ids:
+                statuses[task.local_task_id] = "pending"
+        return statuses
 
     async def _resolve_project_id(self, session, tools: dict[str, object]) -> str:
         if self.config.project_id.strip():
@@ -176,6 +223,54 @@ class Dida365McpTickTickClient:
         if tool_name not in tools:
             raise RuntimeError(f"Required MCP tool `{tool_name}` was not exposed by the Dida365 MCP server.")
         return tools[tool_name]
+
+    async def _list_undone_task_ids(self, session, tools: dict[str, object], project_id: str) -> set[str]:
+        tool_name = "dida365_get_project_tasks"
+        if tool_name not in tools:
+            return set()
+        tool = tools[tool_name]
+        arguments: dict[str, object] = {}
+        self._set_first(arguments, self._tool_properties(tool), ["project_id", "projectId", "project"], project_id)
+        if not arguments:
+            arguments["project_id"] = project_id
+        result = await session.call_tool(tool_name, arguments=arguments)
+        return self._collect_task_like_ids(self._extract_structured_content(result))
+
+    async def _list_completed_task_ids(
+        self,
+        session,
+        tools: dict[str, object],
+        tasks: Sequence[TickTickSyncTask],
+        project_id: str,
+    ) -> set[str]:
+        tool_name = "dida365_get_completed_tasks"
+        if tool_name not in tools:
+            return set()
+        tool = tools[tool_name]
+        properties = self._tool_properties(tool)
+        now = datetime.now()
+        from_date = min(task.due_at for task in tasks) - timedelta(days=30)
+        to_date = max(now, max(task.due_at for task in tasks)) + timedelta(days=1)
+        arguments: dict[str, object] = {}
+        self._set_first(arguments, properties, ["project_id", "projectId", "project"], project_id)
+        self._set_first(
+            arguments,
+            properties,
+            ["from_date", "fromDate", "from", "start_date", "startDate", "start"],
+            from_date.isoformat(timespec="seconds"),
+        )
+        self._set_first(
+            arguments,
+            properties,
+            ["to_date", "toDate", "to", "end_date", "endDate", "end"],
+            to_date.isoformat(timespec="seconds"),
+        )
+        if not any(key in arguments for key in ("from_date", "fromDate", "from", "start_date", "startDate", "start")):
+            arguments["from"] = from_date.isoformat(timespec="seconds")
+        if not any(key in arguments for key in ("to_date", "toDate", "to", "end_date", "endDate", "end")):
+            arguments["to"] = to_date.isoformat(timespec="seconds")
+        result = await session.call_tool(tool_name, arguments=arguments)
+        return self._collect_task_like_ids(self._extract_structured_content(result))
 
     def _build_task_arguments(
         self,
@@ -304,6 +399,31 @@ class Dida365McpTickTickClient:
             if match:
                 return match.group(1)
         return ""
+
+    def _collect_task_like_ids(self, payload: object) -> set[str]:
+        ids: set[str] = set()
+        self._collect_task_like_ids_into(payload, ids)
+        return ids
+
+    def _collect_task_like_ids_into(self, payload: object, target: set[str]) -> None:
+        if isinstance(payload, dict):
+            candidate = None
+            for key in ("task_id", "taskId", "id"):
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    candidate = value.strip()
+                    break
+            if candidate and any(
+                key in payload
+                for key in ("title", "content", "projectId", "project_id", "dueDate", "due_date", "priority", "status")
+            ):
+                target.add(candidate)
+            for value in payload.values():
+                self._collect_task_like_ids_into(value, target)
+            return
+        if isinstance(payload, list):
+            for item in payload:
+                self._collect_task_like_ids_into(item, target)
 
     def _try_parse_json(self, text: str) -> object | None:
         text = text.strip()

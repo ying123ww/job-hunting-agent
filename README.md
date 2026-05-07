@@ -256,6 +256,7 @@ curl http://127.0.0.1:8000/plan/today
 - 完整 metadata 和业务关系以 SQLite 为准
 - 未配置 Dida365 MCP 时，`POST /plan/sync_ticktick` 会退回 `dry_run`
 - 配置 Dida365 MCP 后，agent 内部和 API 都会通过 MCP 调用真实滴答工具
+- 再次执行 `POST /plan/sync_ticktick` 时，会按 `ticktick_id` 回写本地任务完成状态
 
 ## Smoke Test
 

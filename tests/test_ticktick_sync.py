@@ -122,6 +122,7 @@ def test_plan_service_sync_updates_local_ticktick_ids(tmp_path) -> None:
     class FakeTickTickClient:
         def __init__(self) -> None:
             self.seen: list[TickTickSyncTask] = []
+            self.status_seen: list[TickTickSyncTask] = []
 
         def sync(self, tasks):
             self.seen = list(tasks)
@@ -138,6 +139,13 @@ def test_plan_service_sync_updates_local_ticktick_ids(tmp_path) -> None:
                     for index, task in enumerate(self.seen, start=1)
                 ],
             )
+
+        def fetch_statuses(self, tasks):
+            self.status_seen = list(tasks)
+            return {
+                tasks[0].local_task_id: "completed",
+                tasks[1].local_task_id: "pending",
+            }
 
     db = DatabaseManager(f"sqlite:///{tmp_path / 'app.db'}")
     db.create_all()
@@ -189,4 +197,6 @@ def test_plan_service_sync_updates_local_ticktick_ids(tmp_path) -> None:
     assert summary.mode == "live"
     assert summary.synced_count == 2
     assert [task.local_task_id for task in fake_ticktick.seen] == [first.id, second.id]
+    assert [task.local_task_id for task in fake_ticktick.status_seen] == [first.id, second.id]
     assert [task.ticktick_id for task in refreshed] == ["remote_1", "remote_2"]
+    assert [task.status for task in refreshed] == ["completed", "pending"]
