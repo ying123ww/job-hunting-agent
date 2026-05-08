@@ -170,7 +170,7 @@ def _cmd_smoke_sync(args: argparse.Namespace) -> None:
                 priority=4,
                 due_at=datetime.combine(today, time(hour=21, minute=0)),
                 duration_min=5,
-                reason="Created by interview_agent.cli smoke-sync to verify MCP sync.",
+                reason="Created by interview_agent.cli smoke-sync to verify Dida sync.",
             )
 
         summary = container.planning.sync_ticktick(session, user_id=user_id, plan_id=plan.id)

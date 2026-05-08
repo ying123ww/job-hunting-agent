@@ -2,6 +2,8 @@
 
 一个面向面试准备场景的后端 MVP。
 
+变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
 它不是普通的问答机器人，而是把 `JD`、`简历`、`题目 + 用户作答` 统一入库，做短板诊断，再生成当天的准备任务，形成最小闭环。
 
 ## 当前能力
@@ -201,7 +203,7 @@ http://127.0.0.1:8000
 - `GET /plan/today`
 - `POST /plan/sync_ticktick`
 
-### Dida365 MCP
+### Dida365 Open API
 
 要启用真实滴答同步，需要在 `.env` 里配置：
 
@@ -211,11 +213,9 @@ INTERVIEW_AGENT_DIDA365_ACCESS_TOKEN=your_access_token
 INTERVIEW_AGENT_DIDA365_PROJECT_ID=
 INTERVIEW_AGENT_DIDA365_PROJECT_NAME=Interview Copilot Agent
 INTERVIEW_AGENT_DIDA365_REGION=china
-INTERVIEW_AGENT_DIDA365_MCP_COMMAND=/home/ying/projects/job-hunting-agent/.venv/bin/dida365-mcp
-INTERVIEW_AGENT_DIDA365_MCP_ARGS=
 ```
 
-如果没有 `PROJECT_ID`，系统会通过 MCP 的 `dida365_list_projects` 工具按 `PROJECT_NAME` 查找项目。
+如果没有 `PROJECT_ID`，系统会直接调用 Dida365 Open API 的 `/project` 接口，按 `PROJECT_NAME` 查找项目。
 
 ## 最小演示流程
 
@@ -299,8 +299,8 @@ curl http://127.0.0.1:8000/plan/today
 - 默认只做单用户演示
 - Chroma metadata 只放简单标量字段
 - 完整 metadata 和业务关系以 SQLite 为准
-- 未配置 Dida365 MCP 时，`POST /plan/sync_ticktick` 会退回 `dry_run`
-- 配置 Dida365 MCP 后，agent 内部和 API 都会通过 MCP 调用真实滴答工具
+- 未配置 Dida365 Open API 时，`POST /plan/sync_ticktick` 会退回 `dry_run`
+- 配置 Dida365 Open API 后，agent 内部和 API 都会直接调用滴答接口
 - 再次执行 `POST /plan/sync_ticktick` 时，会按 `ticktick_id` 回写本地任务完成状态
 
 ## Smoke Test
@@ -314,7 +314,7 @@ curl http://127.0.0.1:8000/plan/today
 这个脚本会：
 
 - 使用项目自己的 `AppContainer`
-- 读取 `.env` 和 `.venv/bin/dida365-mcp`
+- 读取 `.env`
 - 如果当前默认用户还没有计划，就自动创建一个 demo task
 - 直接跑一遍 `planning.sync_ticktick()`
 
