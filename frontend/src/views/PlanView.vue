@@ -1,0 +1,82 @@
+<template>
+  <AppShell title="Plan">
+    <template #header-actions>
+      <div class="cta-row">
+        <el-input-number v-model="gapLimit" :min="1" :max="10" />
+        <el-button type="primary" :loading="generateMutation.isPending" @click="generatePlan">
+          Generate today plan
+        </el-button>
+        <el-button :loading="syncMutation.isPending" @click="syncPlan">Sync TickTick</el-button>
+      </div>
+    </template>
+
+    <section class="panel section-stack">
+      <div>
+        <p class="eyebrow">Execution</p>
+        <h3 class="section-title">Today’s active tasks</h3>
+      </div>
+      <p class="muted-copy">{{ plan?.summary ?? "No plan for today." }}</p>
+      <p class="desktop-note" v-if="lastSyncMode">
+        Last sync mode in this session: <strong>{{ lastSyncMode }}</strong>
+      </p>
+      <div class="task-list">
+        <article class="task-card" v-for="task in plan?.tasks ?? []" :key="task.task_id">
+          <div class="status-row">
+            <span class="chip">{{ task.dimension }}</span>
+            <span class="chip">priority {{ task.priority }}</span>
+            <span class="chip">{{ task.duration_min }} min</span>
+            <span class="chip">{{ task.status }}</span>
+          </div>
+          <h4>{{ task.title }}</h4>
+          <p class="muted-copy">{{ task.reason }}</p>
+          <p class="muted-copy">Due {{ new Date(task.due_at).toLocaleTimeString() }}</p>
+        </article>
+      </div>
+      <p v-if="!plan?.tasks?.length" class="empty-state">
+        No plan generated yet. Run a diagnosis first, then generate today’s plan.
+      </p>
+    </section>
+  </AppShell>
+</template>
+
+<script setup lang="ts">
+import { ref } from "vue";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+
+import AppShell from "../components/AppShell.vue";
+import { api } from "../lib/api";
+
+const gapLimit = ref(3);
+const lastSyncMode = ref<"dry_run" | "live" | "">("");
+const queryClient = useQueryClient();
+
+const { data: plan } = useQuery({
+  queryKey: ["plan", "today"],
+  queryFn: () => api.getTodayPlan(),
+});
+
+const generateMutation = useMutation({
+  mutationFn: () => api.generatePlan(gapLimit.value),
+  onSuccess: async (data) => {
+    queryClient.setQueryData(["plan", "today"], data);
+    await queryClient.invalidateQueries({ queryKey: ["overview"] });
+  },
+});
+
+const syncMutation = useMutation({
+  mutationFn: () => api.syncTickTick(plan.value?.plan_id || undefined),
+  onSuccess: async (data) => {
+    lastSyncMode.value = data.mode;
+    await queryClient.invalidateQueries({ queryKey: ["plan", "today"] });
+    await queryClient.invalidateQueries({ queryKey: ["overview"] });
+  },
+});
+
+function generatePlan() {
+  generateMutation.mutate();
+}
+
+function syncPlan() {
+  syncMutation.mutate();
+}
+</script>

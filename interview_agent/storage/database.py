@@ -11,7 +11,10 @@ from interview_agent.storage.models import Base
 
 class DatabaseManager:
     def __init__(self, database_url: str) -> None:
-        self.engine = create_engine(database_url, future=True)
+        connect_args: dict[str, object] = {}
+        if database_url.startswith("sqlite:///"):
+            connect_args["check_same_thread"] = False
+        self.engine = create_engine(database_url, future=True, connect_args=connect_args)
         self.session_factory = sessionmaker(
             bind=self.engine,
             expire_on_commit=False,

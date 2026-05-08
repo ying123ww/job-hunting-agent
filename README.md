@@ -14,6 +14,8 @@
 - 做一次 `Gap Analysis`
 - 生成当天计划与任务
 - 提供 `TickTick` dry-run 同步接口
+- 提供一个 `Vue 3 + TypeScript` 的 workbench 前端
+- 提供一个复用同一套前端的 `Electron` 桌面壳
 
 ## 技术栈
 
@@ -37,6 +39,7 @@ interview_agent/
   planning/     计划和任务生成
   retrieval/    source-aware 检索
   storage/      SQLAlchemy model、repository、Chroma 封装
+frontend/       Vue 3 workbench + Electron shell
 tests/          单测和服务层集成测试
 ```
 
@@ -195,6 +198,7 @@ cp .env.example .env
 - `INTERVIEW_AGENT_CHROMA_DIR`
 - `INTERVIEW_AGENT_LLM_BASE_URL`
 - `INTERVIEW_AGENT_LLM_API_KEY`
+- `INTERVIEW_AGENT_CORS_ALLOW_ORIGINS`
 
 ### Workspace 模式
 
@@ -252,6 +256,54 @@ cp .env.example .env
 http://127.0.0.1:8000
 ```
 
+### 4. 启动前端 Workbench
+
+前端代码在 `frontend/` 目录。
+
+先准备一个前端环境变量文件：
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+然后在 `frontend/` 下安装依赖并启动：
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+默认地址：
+
+```text
+http://127.0.0.1:5173
+```
+
+默认会连到：
+
+```text
+http://127.0.0.1:8000
+```
+
+如果你要改前端所连的 API 地址，可以调整：
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:8000
+```
+
+### 5. Electron 桌面壳
+
+Workbench 是 `web-first` 的，Electron 只是同一套前端的桌面包装层。
+
+在 `frontend/` 下运行：
+
+```bash
+npm run dev
+```
+
+如果你的本地 Electron/Vite 工作流已经配好，也可以直接用这套前端产物打包桌面壳。
+
 ## 测试
 
 ```bash
@@ -291,6 +343,12 @@ http://127.0.0.1:8000
 - `POST /plan/generate`
 - `GET /plan/today`
 - `POST /plan/sync_ticktick`
+
+### Workbench
+
+- `GET /workspace/overview`
+- `GET /documents`
+- `GET /documents/{document_id}`
 
 ### Dida365 Open API
 
@@ -369,9 +427,6 @@ curl http://127.0.0.1:8000/plan/today
 
 这版刻意收敛在 MVP，不做这些内容：
 
-- Telegram Bot
-- Web UI
-- 主动提醒状态机
 - 多用户认证
 - PostgreSQL / Qdrant / 消息队列
 
@@ -381,6 +436,7 @@ curl http://127.0.0.1:8000/plan/today
 2. `题目 + 作答评估`
 3. `Gap Analysis`
 4. `计划生成`
+5. `Workbench 浏览器 / Electron 入口`
 
 ## 当前默认行为
 
@@ -408,6 +464,8 @@ curl http://127.0.0.1:8000/plan/today
 - 直接跑一遍 `planning.sync_ticktick()`
 
 ## Telegram Bot
+
+当前建议：把它视为 legacy 辅入口，而不是主产品面。
 
 这版已经可以直接接 Telegram Bot，入口脚本是：
 
@@ -439,6 +497,8 @@ INTERVIEW_AGENT_TELEGRAM_ALLOWED_CHAT_IDS=
 
 ## QQ Bot
 
+当前建议：把它视为 legacy 辅入口，而不是主产品面。
+
 这版还加了一个基于官方 QQBot API 的私聊通道，入口脚本是：
 
 ```bash
@@ -468,4 +528,4 @@ INTERVIEW_AGENT_QQBOT_ALLOWED_OPENIDS=
 - 接真实 LLM 做更稳的评估、摘要和计划文案
 - 加 `mock interview` 模式
 - 加主动提醒和动态重规划
-- 补 Web UI
+- 增加 Electron 原生能力，例如 tray、deep link、系统通知

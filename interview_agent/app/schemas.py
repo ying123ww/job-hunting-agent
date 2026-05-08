@@ -120,6 +120,28 @@ class PlanResponse(BaseModel):
     tasks: list[TaskResponse]
 
 
+class DocumentSummaryResponse(BaseModel):
+    document_id: str
+    source_type: str
+    filename: str | None = None
+    content_hash: str
+    is_active: bool
+    created_at: datetime
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class DocumentDetailResponse(DocumentSummaryResponse):
+    raw_text_preview: str
+
+
+class WorkspaceOverviewResponse(BaseModel):
+    active_document_counts: dict[str, int]
+    latest_overall_risk: str | None = None
+    top_gaps: list[GapResponse]
+    today_plan: PlanResponse
+    ticktick_sync_mode: Literal["dry_run", "live"]
+
+
 class SyncTickTickRequest(BaseModel):
     user_id: str | None = None
     plan_id: str | None = None

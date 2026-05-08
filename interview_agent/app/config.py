@@ -41,6 +41,9 @@ class AppSettings(BaseSettings):
     qqbot_token_url: str = Field(default="https://bots.qq.com/app/getAppAccessToken")
     qqbot_gateway_backoff_sec: int = Field(default=5)
     qqbot_allowed_openids: str = Field(default="")
+    cors_allow_origins: str = Field(
+        default="http://localhost:5173,http://127.0.0.1:5173,null"
+    )
 
     model_config = SettingsConfigDict(
         env_prefix="INTERVIEW_AGENT_",
@@ -103,6 +106,16 @@ class AppSettings(BaseSettings):
             if not item:
                 continue
             values.add(item)
+        return values
+
+    @property
+    def cors_allow_origins_list(self) -> list[str]:
+        values: list[str] = []
+        for raw in self.cors_allow_origins.split(","):
+            item = raw.strip()
+            if not item:
+                continue
+            values.append(item)
         return values
 
     def ensure_data_dirs(self) -> None:

@@ -537,13 +537,38 @@ class InterviewRepository:
     def get_document_chunk(self, session: Session, *, chunk_id: str) -> DocumentChunk | None:
         return session.get(DocumentChunk, chunk_id)
 
-    def list_documents(self, session: Session, *, user_id: str, source_type: str) -> list[Document]:
-        stmt = (
-            select(Document)
-            .where(Document.user_id == user_id, Document.source_type == source_type)
-            .order_by(desc(Document.created_at))
-        )
+    def list_documents(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        source_type: str | None = None,
+        active_only: bool = True,
+        limit: int | None = None,
+    ) -> list[Document]:
+        stmt = select(Document).where(Document.user_id == user_id)
+        if source_type is not None:
+            stmt = stmt.where(Document.source_type == source_type)
+        if active_only:
+            stmt = stmt.where(Document.is_active.is_(True))
+        stmt = stmt.order_by(desc(Document.created_at))
+        if limit is not None:
+            stmt = stmt.limit(limit)
         return list(session.scalars(stmt))
+
+    def get_document(self, session: Session, *, document_id: str) -> Document | None:
+        return session.get(Document, document_id)
+
+    def count_active_documents_by_source(self, session: Session, *, user_id: str) -> dict[str, int]:
+        rows = session.execute(
+            select(Document.source_type, func.count(Document.id))
+            .where(Document.user_id == user_id, Document.is_active.is_(True))
+            .group_by(Document.source_type)
+        ).all()
+        counts = {"resume": 0, "jd": 0, "question": 0}
+        for source_type, count in rows:
+            counts[str(source_type)] = int(count)
+        return counts
 
     def list_chunks_for_documents(self, session: Session, *, document_ids: Sequence[str]) -> list[DocumentChunk]:
         if not document_ids:
