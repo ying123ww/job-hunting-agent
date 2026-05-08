@@ -54,6 +54,10 @@ class QuestionRecordResponse(BaseModel):
 class QuestionIngestResponse(IngestResponse):
     processed_count: int
     deduped_count: int
+    skipped_count: int = 0
+    inactive_count: int = 0
+    fallback_used: bool = False
+    pipeline_version: str = "question_ingestion_v2"
     top_gaps_found: list[str]
     records: list[QuestionRecordResponse]
 

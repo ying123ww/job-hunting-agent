@@ -75,6 +75,7 @@ class AppContainer:
             settings=settings,
             repository=repository,
             vector_store=vector_store,
+            provider=provider,
         )
         diagnosis = GapAnalysisService(
             repository=repository,
@@ -143,6 +144,8 @@ class AppContainer:
             repository=repository,
         )
         db.create_all()
+        with db.session_scope() as session:
+            repository.rebuild_retrieval_fts(session)
         return cls(
             settings=settings,
             db=db,

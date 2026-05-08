@@ -120,6 +120,11 @@ class Question(Base):
     dimension: Mapped[str] = mapped_column(String, index=True)
     topics: Mapped[list[str]] = mapped_column(JSON, default=list)
     reference_answer: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    question_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    source_scope: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    superseded_by: Mapped[str | None] = mapped_column(String, nullable=True)
     latest_mastery_level: Mapped[str] = mapped_column(String, default="未评估")
     last_answered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

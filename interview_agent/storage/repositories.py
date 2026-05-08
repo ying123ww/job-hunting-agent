@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
+import re
 from typing import Any, Sequence
 
-from sqlalchemy import Select, desc, func, select
+from sqlalchemy import Select, desc, func, select, text
 from sqlalchemy.orm import Session
 
 from interview_agent.storage.models import (
@@ -25,6 +27,47 @@ from interview_agent.storage.models import (
 
 def utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+_FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
+
+
+@dataclass(slots=True)
+class LexicalMatch:
+    item_id: str
+    item_type: str
+    source_type: str
+    document_id: str
+    chunk_id: str
+    text: str
+    dimension: str | None
+    question_id: str | None
+    topics_text: str
+    source_scope: str | None
+    rank: float
+
+
+def build_question_searchable_text(question: Question) -> str:
+    parts = [
+        question.text,
+        question.reference_answer,
+        " ".join(topic for topic in question.topics if topic),
+        question.source_company or "",
+        question.source_role or "",
+    ]
+    return "\n".join(part.strip() for part in parts if part and part.strip())
+
+
+def build_chunk_searchable_text(chunk: DocumentChunk) -> str:
+    metadata = chunk.metadata_json or {}
+    parts = [
+        chunk.text,
+        str(metadata.get("topics_text", "")),
+        str(metadata.get("source_company", "")),
+        str(metadata.get("source_role", "")),
+        str(metadata.get("dimension", "")),
+    ]
+    return "\n".join(part.strip() for part in parts if part and part.strip())
 
 
 class InterviewRepository:
@@ -96,6 +139,11 @@ class InterviewRepository:
                 stmt = stmt.where(func.json_extract(Document.metadata_json, "$.company") == company)
             if role:
                 stmt = stmt.where(func.json_extract(Document.metadata_json, "$.role") == role)
+        elif source_type == "question":
+            source_scope = metadata.get("source_scope")
+            if not source_scope:
+                return []
+            stmt = stmt.where(func.json_extract(Document.metadata_json, "$.source_scope") == source_scope)
         elif source_type != "resume":
             return []
 
@@ -127,6 +175,14 @@ class InterviewRepository:
             metadata_json=metadata_json,
         )
         session.add(document)
+        session.flush()
+        return document
+
+    def update_document_metadata(self, session: Session, *, document_id: str, metadata_json: dict[str, Any]) -> Document | None:
+        document = session.get(Document, document_id)
+        if document is None:
+            return None
+        document.metadata_json = metadata_json
         session.flush()
         return document
 
@@ -216,6 +272,9 @@ class InterviewRepository:
         dimension: str,
         topics: list[str],
         reference_answer: str,
+        normalized_text: str,
+        question_fingerprint: str,
+        source_scope: str | None,
     ) -> Question:
         question = Question(
             user_id=user_id,
@@ -227,8 +286,20 @@ class InterviewRepository:
             dimension=dimension,
             topics=topics,
             reference_answer=reference_answer,
+            normalized_text=normalized_text,
+            question_fingerprint=question_fingerprint,
+            source_scope=source_scope,
         )
         session.add(question)
+        session.flush()
+        return question
+
+    def deactivate_question(self, session: Session, *, question_id: str, superseded_by: str | None = None) -> Question | None:
+        question = session.get(Question, question_id)
+        if question is None:
+            return None
+        question.is_active = False
+        question.superseded_by = superseded_by
         session.flush()
         return question
 
@@ -268,8 +339,28 @@ class InterviewRepository:
         question.latest_mastery_level = mastery_level
         question.last_answered_at = utcnow()
 
-    def list_questions(self, session: Session, *, user_id: str) -> list[Question]:
-        stmt = select(Question).where(Question.user_id == user_id).order_by(desc(Question.last_answered_at))
+    def list_questions(self, session: Session, *, user_id: str, active_only: bool = True) -> list[Question]:
+        stmt = select(Question).where(Question.user_id == user_id)
+        if active_only:
+            stmt = stmt.where(Question.is_active.is_(True))
+        stmt = stmt.order_by(desc(Question.last_answered_at))
+        return list(session.scalars(stmt))
+
+    def list_questions_for_scope(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        source_scope: str,
+        active_only: bool = True,
+    ) -> list[Question]:
+        stmt = select(Question).where(
+            Question.user_id == user_id,
+            Question.source_scope == source_scope,
+        )
+        if active_only:
+            stmt = stmt.where(Question.is_active.is_(True))
+        stmt = stmt.order_by(desc(Question.last_answered_at))
         return list(session.scalars(stmt))
 
     def list_answer_records_for_question(
@@ -459,6 +550,205 @@ class InterviewRepository:
             return []
         stmt = select(DocumentChunk).where(DocumentChunk.document_id.in_(document_ids))
         return list(session.scalars(stmt))
+
+    def list_active_document_chunks(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        source_types: Sequence[str] | None = None,
+    ) -> list[DocumentChunk]:
+        stmt = (
+            select(DocumentChunk)
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .where(DocumentChunk.user_id == user_id, Document.is_active.is_(True))
+            .order_by(DocumentChunk.chunk_index)
+        )
+        if source_types:
+            stmt = stmt.where(DocumentChunk.source_type.in_(source_types))
+        return list(session.scalars(stmt))
+
+    def get_question(self, session: Session, *, question_id: str) -> Question | None:
+        return session.get(Question, question_id)
+
+    def update_retrieval_fts(
+        self,
+        session: Session,
+        *,
+        item_id: str,
+        item_type: str,
+        searchable_text: str,
+        is_active: bool,
+        user_id: str,
+        source_scope: str | None,
+        source_type: str,
+        dimension: str | None,
+    ) -> None:
+        session.execute(text("DELETE FROM retrieval_fts WHERE item_id = :item_id"), {"item_id": item_id})
+        session.execute(
+            text(
+                "INSERT INTO retrieval_fts (item_id, item_type, searchable_text, is_active, user_id, source_scope, source_type, dimension) "
+                "VALUES (:item_id, :item_type, :searchable_text, :is_active, :user_id, :source_scope, :source_type, :dimension)"
+            ),
+            {
+                "item_id": item_id,
+                "item_type": item_type,
+                "searchable_text": searchable_text,
+                "is_active": 1 if is_active else 0,
+                "user_id": user_id,
+                "source_scope": source_scope or "",
+                "source_type": source_type,
+                "dimension": dimension or "",
+            },
+        )
+
+    def delete_retrieval_fts(self, session: Session, *, item_id: str) -> None:
+        session.execute(text("DELETE FROM retrieval_fts WHERE item_id = :item_id"), {"item_id": item_id})
+
+    def lexical_search(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        query_text: str,
+        source_types: Sequence[str] | None,
+        limit: int,
+    ) -> list[LexicalMatch]:
+        sanitized_query = self._sanitize_fts_query(query_text)
+        if not sanitized_query:
+            return []
+        params: dict[str, Any] = {
+            "query_text": sanitized_query,
+            "user_id": user_id,
+            "limit": limit,
+        }
+        filters = [
+            "retrieval_fts MATCH :query_text",
+            "user_id = :user_id",
+            "is_active = 1",
+        ]
+        if source_types:
+            placeholders: list[str] = []
+            for index, source_type in enumerate(source_types):
+                key = f"source_type_{index}"
+                params[key] = source_type
+                placeholders.append(f":{key}")
+            filters.append(f"source_type IN ({', '.join(placeholders)})")
+
+        rows = session.execute(
+            text(
+                "SELECT item_id, item_type, source_type, source_scope, dimension, bm25(retrieval_fts) AS rank "
+                "FROM retrieval_fts "
+                f"WHERE {' AND '.join(filters)} "
+                "ORDER BY rank LIMIT :limit"
+            ),
+            params,
+        ).mappings().all()
+        if not rows:
+            return []
+
+        question_ids = [row["item_id"] for row in rows if row["item_type"] == "question"]
+        chunk_ids = [row["item_id"] for row in rows if row["item_type"] == "chunk"]
+        questions = (
+            {item.id: item for item in session.scalars(select(Question).where(Question.id.in_(question_ids)))}
+            if question_ids
+            else {}
+        )
+        chunks = (
+            {item.id: item for item in session.scalars(select(DocumentChunk).where(DocumentChunk.id.in_(chunk_ids)))}
+            if chunk_ids
+            else {}
+        )
+
+        matches: list[LexicalMatch] = []
+        for row in rows:
+            if row["item_type"] == "question":
+                question = questions.get(row["item_id"])
+                if question is None:
+                    continue
+                matches.append(
+                    LexicalMatch(
+                        item_id=question.id,
+                        item_type="question",
+                        source_type="question",
+                        document_id=question.document_id or "",
+                        chunk_id=question.source_chunk_id or "",
+                        text=question.text,
+                        dimension=question.dimension,
+                        question_id=question.id,
+                        topics_text=",".join(question.topics),
+                        source_scope=question.source_scope,
+                        rank=float(row["rank"] or 0.0),
+                    )
+                )
+                continue
+
+            chunk = chunks.get(row["item_id"])
+            if chunk is None:
+                continue
+            metadata = chunk.metadata_json or {}
+            matches.append(
+                LexicalMatch(
+                    item_id=chunk.id,
+                    item_type="chunk",
+                    source_type=chunk.source_type,
+                    document_id=chunk.document_id,
+                    chunk_id=chunk.id,
+                    text=chunk.text,
+                    dimension=str(metadata.get("dimension") or "") or None,
+                    question_id=str(metadata.get("question_id") or "") or None,
+                    topics_text=str(metadata.get("topics_text") or ""),
+                    source_scope=str(metadata.get("source_scope") or "") or None,
+                    rank=float(row["rank"] or 0.0),
+                )
+                )
+        return matches
+
+    def _sanitize_fts_query(self, query_text: str) -> str:
+        tokens = _FTS_TOKEN_RE.findall(query_text.lower())
+        return " OR ".join(tokens[:8]).strip()
+
+    def rebuild_retrieval_fts(self, session: Session, *, user_id: str | None = None) -> None:
+        if user_id is None:
+            session.execute(text("DELETE FROM retrieval_fts"))
+        else:
+            session.execute(text("DELETE FROM retrieval_fts WHERE user_id = :user_id"), {"user_id": user_id})
+
+        question_stmt = select(Question).where(Question.is_active.is_(True))
+        chunk_stmt = (
+            select(DocumentChunk)
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .where(Document.is_active.is_(True))
+        )
+        if user_id is not None:
+            question_stmt = question_stmt.where(Question.user_id == user_id)
+            chunk_stmt = chunk_stmt.where(DocumentChunk.user_id == user_id)
+
+        for question in session.scalars(question_stmt):
+            self.update_retrieval_fts(
+                session,
+                item_id=question.id,
+                item_type="question",
+                searchable_text=build_question_searchable_text(question),
+                is_active=True,
+                user_id=question.user_id,
+                source_scope=question.source_scope,
+                source_type="question",
+                dimension=question.dimension,
+            )
+        for chunk in session.scalars(chunk_stmt):
+            metadata = chunk.metadata_json or {}
+            self.update_retrieval_fts(
+                session,
+                item_id=chunk.id,
+                item_type="chunk",
+                searchable_text=build_chunk_searchable_text(chunk),
+                is_active=True,
+                user_id=chunk.user_id,
+                source_scope=str(metadata.get("source_scope") or "") or None,
+                source_type=chunk.source_type,
+                dimension=str(metadata.get("dimension") or "") or None,
+            )
 
     def find_memory_item_by_hash(
         self,

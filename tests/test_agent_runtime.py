@@ -77,7 +77,7 @@ def test_agent_runtime_writes_markdown_memory(monkeypatch, tmp_path) -> None:
             company="ByteDance",
             role="Backend Intern",
         )
-        _doc, _records, _count = container.question_ingestion.ingest_questions(
+        _question_result = container.question_ingestion.ingest_questions(
             session,
             user_id="u_demo",
             text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
@@ -434,7 +434,7 @@ def test_semantic_memory_persists_turn_and_proactive_summaries(monkeypatch, tmp_
             company="ByteDance",
             role="Backend Intern",
         )
-        _doc, _records, _count = container.question_ingestion.ingest_questions(
+        _question_result = container.question_ingestion.ingest_questions(
             session,
             user_id="u_demo",
             text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
@@ -663,7 +663,7 @@ def test_context_builder_includes_structured_profile_and_working_memory(monkeypa
             company="ByteDance",
             role="Backend Intern",
         )
-        _doc, _records, _count = container.question_ingestion.ingest_questions(
+        _question_result = container.question_ingestion.ingest_questions(
             session,
             user_id="u_demo",
             text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",

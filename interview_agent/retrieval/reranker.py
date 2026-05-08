@@ -10,13 +10,14 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_+#.@-]+|[\u4e00-\u9fff]{2,}")
 def rerank_score(
     *,
     base_score: float,
+    lexical_score: float,
     metadata: dict[str, object],
     text: str,
     query_variants: Iterable[str],
     dimension: str | None,
     strategy: str,
 ) -> float:
-    score = base_score
+    score = max(base_score, lexical_score)
     meta_dimension = str(metadata.get("dimension", "") or "")
     source_type = str(metadata.get("source_type", "") or "")
 
@@ -30,6 +31,7 @@ def rerank_score(
     elif source_type in {"resume", "jd"}:
         score += 0.05
 
+    score += min(lexical_score * 0.2, 0.18)
     lexical_overlap = max((_overlap_ratio(text, query) for query in query_variants), default=0.0)
     score += min(lexical_overlap * 0.25, 0.2)
     return round(score, 4)

@@ -26,6 +26,14 @@ def _hash_embedding(text: str, dimensions: int) -> list[float]:
 class OpenAICompatibleProvider:
     settings: AppSettings
 
+    def has_real_chat(self) -> bool:
+        return bool(self.settings.llm_base_url and self.settings.llm_api_key)
+
+    def has_real_embeddings(self) -> bool:
+        explicit = bool(self.settings.embedding_base_url and self.settings.embedding_api_key)
+        inherited = bool(self.settings.llm_base_url and self.settings.llm_api_key)
+        return explicit or inherited
+
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
@@ -73,7 +81,7 @@ class OpenAICompatibleProvider:
         user_prompt: str,
         response_format: dict[str, Any] | None = None,
     ) -> str:
-        if not self.settings.llm_base_url or not self.settings.llm_api_key:
+        if not self.has_real_chat():
             content = {
                 "summary": "LLM fallback mode is active. Deterministic local heuristics are in use.",
                 "system_prompt": system_prompt[:120],

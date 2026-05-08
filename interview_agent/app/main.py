@@ -166,7 +166,7 @@ def ingest_questions(request: QuestionIngestRequest) -> QuestionIngestResponse:
     container: AppContainer = app.state.container
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
-        result, records, raw_count = container.question_ingestion.ingest_questions(
+        result = container.question_ingestion.ingest_questions(
             session,
             user_id=user_id,
             text=request.text,
@@ -176,16 +176,20 @@ def ingest_questions(request: QuestionIngestRequest) -> QuestionIngestResponse:
             source_company=request.source_company,
             source_role=request.source_role,
         )
-        top_gaps = [record["gaps"][0] for record in records[:3] if record["gaps"]]
+        top_gaps = [record["gaps"][0] for record in result.records[:3] if record["gaps"]]
         return QuestionIngestResponse(
-            document_id=result.document_id,
-            chunk_count=result.chunk_count,
-            content_hash=result.content_hash,
+            document_id=result.ingested_document.document_id,
+            chunk_count=result.ingested_document.chunk_count,
+            content_hash=result.ingested_document.content_hash,
             message="Questions ingested successfully.",
-            processed_count=raw_count,
-            deduped_count=len(records),
+            processed_count=result.processed_count,
+            deduped_count=len(result.records),
+            skipped_count=result.skipped_count,
+            inactive_count=result.inactive_count,
+            fallback_used=result.fallback_used,
+            pipeline_version=result.pipeline_version,
             top_gaps_found=top_gaps,
-            records=records,
+            records=result.records,
         )
 
 

@@ -45,7 +45,7 @@ def test_end_to_end_service_flow(monkeypatch, tmp_path) -> None:
             role="Backend Intern",
         )
 
-        question_doc, records, raw_count = container.question_ingestion.ingest_questions(
+        question_result = container.question_ingestion.ingest_questions(
             session,
             user_id="u_demo",
             text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
@@ -55,9 +55,9 @@ def test_end_to_end_service_flow(monkeypatch, tmp_path) -> None:
             source_company=None,
             source_role=None,
         )
-        assert question_doc.document_id
-        assert raw_count == 1
-        assert len(records) == 1
+        assert question_result.ingested_document.document_id
+        assert question_result.processed_count == 1
+        assert len(question_result.records) == 1
 
         overall_risk, gaps = container.diagnosis.analyze(
             session,
