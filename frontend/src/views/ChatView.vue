@@ -37,7 +37,7 @@
           placeholder="Ask about your resume, target JD, weak points, or what to practice next."
         />
         <div class="form-actions">
-          <el-button type="primary" :loading="turnMutation.isPending" @click="sendMessage">
+          <el-button type="primary" :loading="turnPending" @click="sendMessage">
             Send
           </el-button>
         </div>
@@ -84,6 +84,7 @@ const turnMutation = useMutation({
     draft.value = "";
   },
 });
+const turnPending = computed(() => turnMutation.isPending.value);
 
 const latestAssistantEvidence = computed(() => {
   const lastAssistant = [...store.chatTranscript]

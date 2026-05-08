@@ -3,10 +3,10 @@
     <template #header-actions>
       <div class="cta-row">
         <el-input-number v-model="gapLimit" :min="1" :max="10" />
-        <el-button type="primary" :loading="generateMutation.isPending" @click="generatePlan">
+        <el-button type="primary" :loading="generatePending" @click="generatePlan">
           Generate today plan
         </el-button>
-        <el-button :loading="syncMutation.isPending" @click="syncPlan">Sync TickTick</el-button>
+        <el-button :loading="syncPending" @click="syncPlan">Sync TickTick</el-button>
       </div>
     </template>
 
@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 
 import AppShell from "../components/AppShell.vue";
@@ -62,6 +62,7 @@ const generateMutation = useMutation({
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });
+const generatePending = computed(() => generateMutation.isPending.value);
 
 const syncMutation = useMutation({
   mutationFn: () => api.syncTickTick(plan.value?.plan_id || undefined),
@@ -71,6 +72,7 @@ const syncMutation = useMutation({
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });
+const syncPending = computed(() => syncMutation.isPending.value);
 
 function generatePlan() {
   generateMutation.mutate();

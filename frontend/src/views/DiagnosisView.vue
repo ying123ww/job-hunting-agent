@@ -3,7 +3,7 @@
     <template #header-actions>
       <div class="cta-row">
         <el-input-number v-model="limit" :min="1" :max="10" />
-        <el-button type="primary" :loading="analyzeMutation.isPending" @click="runDiagnosis">
+        <el-button type="primary" :loading="analyzePending" @click="runDiagnosis">
           Run gap analysis
         </el-button>
       </div>
@@ -46,7 +46,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 
 import AppShell from "../components/AppShell.vue";
@@ -66,6 +66,7 @@ const analyzeMutation = useMutation({
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });
+const analyzePending = computed(() => analyzeMutation.isPending.value);
 
 function runDiagnosis() {
   analyzeMutation.mutate();

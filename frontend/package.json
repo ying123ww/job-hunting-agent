@@ -6,7 +6,9 @@
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
+    "dev:electron": "VITE_ENABLE_ELECTRON=1 vite",
     "build": "vue-tsc --noEmit && vite build",
+    "build:electron": "VITE_ENABLE_ELECTRON=1 sh -c 'vue-tsc --noEmit && vite build'",
     "preview": "vite preview",
     "test:unit": "vitest run",
     "test:e2e": "playwright test"

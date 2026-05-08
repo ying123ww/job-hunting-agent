@@ -292,6 +292,17 @@ http://127.0.0.1:8000
 VITE_API_BASE_URL=http://127.0.0.1:8000
 ```
 
+当前推荐工作流：
+
+- `npm run dev`
+  只启动浏览器版 workbench
+- `npm run dev:electron`
+  在浏览器 workbench 的基础上额外启动 Electron 桌面壳
+- `npm run build`
+  构建浏览器版产物
+- `npm run build:electron`
+  构建包含 Electron 主进程与 preload 的桌面产物
+
 ### 5. Electron 桌面壳
 
 Workbench 是 `web-first` 的，Electron 只是同一套前端的桌面包装层。
@@ -299,10 +310,48 @@ Workbench 是 `web-first` 的，Electron 只是同一套前端的桌面包装层
 在 `frontend/` 下运行：
 
 ```bash
+npm run dev:electron
+```
+
+如果你只是调试页面，不需要启动 Electron，直接使用：
+
+```bash
 npm run dev
 ```
 
-如果你的本地 Electron/Vite 工作流已经配好，也可以直接用这套前端产物打包桌面壳。
+当前 Electron 设计是最小桌面壳：
+
+- `contextIsolation=true`
+- renderer 不暴露 Node API
+- preload 只提供：
+  - `window.desktop.isElectron`
+  - `window.desktop.getAppVersion()`
+
+## Workbench 结构
+
+当前 workbench 有 5 个主页面：
+
+- `Dashboard`
+  看 overview、top gaps、today plan 和 sync mode
+- `Sources`
+  上传 `Resume` / `JD` / `Questions`，并查看最近文档历史与预览
+- `Diagnosis`
+  手动触发 gap analysis，查看薄弱项、修复建议和证据
+- `Plan`
+  生成今日计划，并手动同步 TickTick
+- `Chat`
+  调用 `/agent/turn` 对话，并展示最近一次 assistant evidence
+
+其中 `Sources` 页现在的布局是：
+
+- 左栏：
+  `Resume`、`JD`、`Questions` 三个 tab
+- 每个 tab 支持：
+  粘贴文本、上传文件、触发入库
+- 右栏：
+  最近文档历史列表
+- 点击文档后：
+  展示 `filename`、`created_at`、`content_hash` 和 `raw_text_preview`
 
 ## 测试
 
@@ -320,6 +369,19 @@ npm run dev
 - hybrid retrieval merge / rerank
 - gap priority 计算
 - 服务层端到端闭环
+
+前端测试脚手架位于 `frontend/`：
+
+```bash
+cd frontend
+npm run test:unit
+npm run test:e2e
+```
+
+当前包含：
+
+- `Vitest + Vue Test Utils` 单测骨架
+- `Playwright` E2E 骨架
 
 ## API
 

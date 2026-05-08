@@ -18,7 +18,7 @@
               />
               <input type="file" @change="onResumeFile" />
               <div class="form-actions">
-                <el-button type="primary" :loading="resumeMutation.isPending" @click="submitResume">
+                <el-button type="primary" :loading="resumePending" @click="submitResume">
                   Save resume
                 </el-button>
               </div>
@@ -37,7 +37,7 @@
               />
               <input type="file" @change="onJdFile" />
               <div class="form-actions">
-                <el-button type="primary" :loading="jdMutation.isPending" @click="submitJd">
+                <el-button type="primary" :loading="jdPending" @click="submitJd">
                   Save JD
                 </el-button>
               </div>
@@ -56,7 +56,7 @@
               />
               <input type="file" @change="onQuestionFile" />
               <div class="form-actions">
-                <el-button type="primary" :loading="questionMutation.isPending" @click="submitQuestions">
+                <el-button type="primary" :loading="questionPending" @click="submitQuestions">
                   Save question set
                 </el-button>
               </div>
@@ -92,7 +92,7 @@
         <div class="document-list">
           <article
             class="document-card"
-            v-for="doc in documentsQuery.data ?? []"
+            v-for="doc in documentsData ?? []"
             :key="doc.document_id"
             @click="selectDocument(doc.document_id)"
           >
@@ -105,20 +105,20 @@
           </article>
         </div>
 
-        <article v-if="selectedDocumentQuery.data" class="detail-card">
+        <article v-if="selectedDocument" class="detail-card">
           <p class="eyebrow">Preview</p>
-          <h4>{{ selectedDocumentQuery.data.filename || selectedDocumentQuery.data.document_id }}</h4>
+          <h4>{{ selectedDocument.filename || selectedDocument.document_id }}</h4>
           <dl class="metadata-grid">
             <div>
               <dt>Content hash</dt>
-              <dd>{{ selectedDocumentQuery.data.content_hash }}</dd>
+              <dd>{{ selectedDocument.content_hash }}</dd>
             </div>
             <div>
               <dt>Created at</dt>
-              <dd>{{ new Date(selectedDocumentQuery.data.created_at).toLocaleString() }}</dd>
+              <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
             </div>
           </dl>
-          <pre class="raw-preview">{{ selectedDocumentQuery.data.raw_text_preview }}</pre>
+          <pre class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
         </article>
       </section>
     </div>
@@ -143,7 +143,7 @@ const pendingJdFilename = ref<string>("");
 const pendingQuestionBase64 = ref<string>("");
 const pendingQuestionFilename = ref<string>("");
 
-const documentsQuery = useQuery({
+const { data: documentsData } = useQuery({
   queryKey: computed(() => ["documents", store.currentSourceTab, showOnlyActive.value]),
   queryFn: () =>
     api.getDocuments({
@@ -153,7 +153,7 @@ const documentsQuery = useQuery({
     }),
 });
 
-const selectedDocumentQuery = useQuery({
+const { data: selectedDocument } = useQuery({
   queryKey: computed(() => ["document-detail", store.selectedDocumentId]),
   queryFn: () => api.getDocumentDetail(store.selectedDocumentId),
   enabled: computed(() => Boolean(store.selectedDocumentId)),
@@ -173,6 +173,7 @@ const resumeMutation = useMutation({
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });
+const resumePending = computed(() => resumeMutation.isPending.value);
 
 const jdMutation = useMutation({
   mutationFn: () =>
@@ -190,6 +191,7 @@ const jdMutation = useMutation({
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });
+const jdPending = computed(() => jdMutation.isPending.value);
 
 const questionMutation = useMutation({
   mutationFn: () =>
@@ -208,6 +210,7 @@ const questionMutation = useMutation({
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });
+const questionPending = computed(() => questionMutation.isPending.value);
 
 function selectDocument(documentId: string) {
   store.selectedDocumentId = documentId;
