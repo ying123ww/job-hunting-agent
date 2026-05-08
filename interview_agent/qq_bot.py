@@ -39,6 +39,14 @@ class QQInboundMessage:
     message_id: str
 
 
+@dataclass(slots=True)
+class QQQuestionIngestCommand:
+    text: str
+    source_key: str | None
+    source_company: str | None
+    source_role: str | None
+
+
 @contextmanager
 def _session_scope(container: AppContainer) -> Iterator[Any]:
     with container.db.session_scope() as session:
@@ -208,14 +216,32 @@ class QQBotService:
         if text == "/start":
             await self.client.send_private_text(
                 openid=message.openid,
-                text="Send a text message to chat with the interview agent.",
+                text=(
+                    "Send a text message to chat with the interview agent.\n"
+                    "Use /ingest_questions on the first line to upload a pasted question set."
+                ),
             )
             return
         if text == "/help":
             await self.client.send_private_text(
                 openid=message.openid,
-                text="Send a text message to chat with the interview agent.",
+                text=(
+                    "Send a text message to chat with the interview agent.\n"
+                    "Question bank upload format:\n"
+                    "/ingest_questions source_key=mock-001 company=ByteDance role=Backend\n"
+                    "Redis 为什么单线程还这么快？\n"
+                    "我的答案：因为它是内存操作。"
+                ),
             )
+            return
+
+        try:
+            ingest_command = self._parse_question_ingest_command(text)
+        except ValueError as exc:
+            await self.client.send_private_text(openid=message.openid, text=str(exc))
+            return
+        if ingest_command is not None:
+            await self._handle_question_ingest(message, ingest_command)
             return
 
         with _session_scope(self.container) as session:
@@ -341,3 +367,69 @@ class QQBotService:
 
     def _user_id(self, openid: str) -> str:
         return f"qqbot_{openid}"
+
+    async def _handle_question_ingest(
+        self,
+        message: QQInboundMessage,
+        command: QQQuestionIngestCommand,
+    ) -> None:
+        with _session_scope(self.container) as session:
+            result = self.container.question_ingestion.ingest_questions(
+                session,
+                user_id=self._user_id(message.openid),
+                text=command.text,
+                content_base64=None,
+                filename="qqbot_questions.txt",
+                metadata={"source_key": command.source_key} if command.source_key else {},
+                source_company=command.source_company,
+                source_role=command.source_role,
+            )
+        await self.client.send_private_text(
+            openid=message.openid,
+            text=(
+                "Question bank ingested successfully.\n"
+                f"processed={result.processed_count}\n"
+                f"deduped={len(result.records)}\n"
+                f"skipped={result.skipped_count}\n"
+                f"inactive={result.inactive_count}\n"
+                f"fallback={result.fallback_used}"
+            ),
+        )
+
+    def _parse_question_ingest_command(self, text: str) -> QQQuestionIngestCommand | None:
+        lines = text.splitlines()
+        if not lines:
+            return None
+        first_line = lines[0].strip()
+        if not first_line.startswith("/ingest_questions"):
+            return None
+
+        body = "\n".join(line.rstrip() for line in lines[1:]).strip()
+        if not body:
+            raise ValueError(
+                "Question bank upload requires pasted content after /ingest_questions."
+            )
+
+        source_key: str | None = None
+        source_company: str | None = None
+        source_role: str | None = None
+        for token in first_line.split()[1:]:
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            normalized = value.strip()
+            if not normalized:
+                continue
+            if key == "source_key":
+                source_key = normalized
+            elif key == "company":
+                source_company = normalized
+            elif key == "role":
+                source_role = normalized
+
+        return QQQuestionIngestCommand(
+            text=body,
+            source_key=source_key,
+            source_company=source_company,
+            source_role=source_role,
+        )

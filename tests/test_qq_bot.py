@@ -44,6 +44,41 @@ class FakeDB:
         yield object()
 
 
+class FakeQuestionIngestion:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def ingest_questions(
+        self,
+        session,
+        *,
+        user_id: str,
+        text: str | None,
+        content_base64,
+        filename: str | None,
+        metadata,
+        source_company: str | None,
+        source_role: str | None,
+    ):
+        self.calls.append(
+            {
+                "user_id": user_id,
+                "text": text,
+                "filename": filename,
+                "metadata": metadata,
+                "source_company": source_company,
+                "source_role": source_role,
+            }
+        )
+        return SimpleNamespace(
+            processed_count=2,
+            records=[{"question_id": "q1"}, {"question_id": "q2"}],
+            skipped_count=1,
+            inactive_count=0,
+            fallback_used=False,
+        )
+
+
 def _settings(**overrides):
     base = {
         "qqbot_gateway_backoff_sec": 5,
@@ -56,7 +91,11 @@ def _settings(**overrides):
 def test_qq_bot_handles_c2c_message() -> None:
     client = FakeQQBotClient()
     runtime = FakeAgentRuntime()
-    container = SimpleNamespace(db=FakeDB(), agent_runtime=runtime)
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=runtime,
+        question_ingestion=FakeQuestionIngestion(),
+    )
     service = QQBotService(
         container=container,
         client=client,
@@ -81,7 +120,11 @@ def test_qq_bot_handles_c2c_message() -> None:
 
 def test_qq_bot_ignores_empty_content() -> None:
     client = FakeQQBotClient()
-    container = SimpleNamespace(db=FakeDB(), agent_runtime=FakeAgentRuntime())
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=FakeAgentRuntime(),
+        question_ingestion=FakeQuestionIngestion(),
+    )
     service = QQBotService(
         container=container,
         client=client,
@@ -102,7 +145,11 @@ def test_qq_bot_ignores_empty_content() -> None:
 def test_qq_bot_blocks_openid_not_in_allowlist() -> None:
     client = FakeQQBotClient()
     runtime = FakeAgentRuntime()
-    container = SimpleNamespace(db=FakeDB(), agent_runtime=runtime)
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=runtime,
+        question_ingestion=FakeQuestionIngestion(),
+    )
     service = QQBotService(
         container=container,
         client=client,
@@ -128,7 +175,11 @@ def test_qq_bot_blocks_openid_not_in_allowlist() -> None:
 def test_qq_bot_allows_openid_in_allowlist() -> None:
     client = FakeQQBotClient()
     runtime = FakeAgentRuntime()
-    container = SimpleNamespace(db=FakeDB(), agent_runtime=runtime)
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=runtime,
+        question_ingestion=FakeQuestionIngestion(),
+    )
     service = QQBotService(
         container=container,
         client=client,
@@ -151,7 +202,11 @@ def test_qq_bot_allows_openid_in_allowlist() -> None:
 
 def test_qq_bot_failure_notifies_user() -> None:
     client = FakeQQBotClient()
-    container = SimpleNamespace(db=FakeDB(), agent_runtime=FakeAgentRuntime())
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=FakeAgentRuntime(),
+        question_ingestion=FakeQuestionIngestion(),
+    )
     service = QQBotService(
         container=container,
         client=client,
@@ -176,4 +231,81 @@ def test_qq_bot_failure_notifies_user() -> None:
 
     assert client.private_messages == [
         ("openid_123", "Agent processing failed. Check server logs and try again.")
+    ]
+
+
+def test_qq_bot_ingests_question_bank_from_command() -> None:
+    client = FakeQQBotClient()
+    runtime = FakeAgentRuntime()
+    ingestion = FakeQuestionIngestion()
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=runtime,
+        question_ingestion=ingestion,
+    )
+    service = QQBotService(
+        container=container,
+        client=client,
+        settings=_settings(),
+    )
+
+    inbound = service.extract_inbound_message(
+        {
+            "id": "msg_2",
+            "content": (
+                "/ingest_questions source_key=mock-001 company=ByteDance role=Backend\n"
+                "Redis 为什么单线程还这么快？\n"
+                "我的答案：因为它是内存操作。"
+            ),
+            "author": {"user_openid": "openid_123"},
+        }
+    )
+
+    assert inbound is not None
+    asyncio.run(service.handle_inbound(inbound))
+
+    assert runtime.calls == []
+    assert ingestion.calls == [
+        {
+            "user_id": "qqbot_openid_123",
+            "text": "Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
+            "filename": "qqbot_questions.txt",
+            "metadata": {"source_key": "mock-001"},
+            "source_company": "ByteDance",
+            "source_role": "Backend",
+        }
+    ]
+    assert client.private_messages == [
+        (
+            "openid_123",
+            "Question bank ingested successfully.\nprocessed=2\ndeduped=2\nskipped=1\ninactive=0\nfallback=False",
+        )
+    ]
+
+
+def test_qq_bot_ingest_command_requires_body() -> None:
+    client = FakeQQBotClient()
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=FakeAgentRuntime(),
+        question_ingestion=FakeQuestionIngestion(),
+    )
+    service = QQBotService(
+        container=container,
+        client=client,
+        settings=_settings(),
+    )
+
+    inbound = service.extract_inbound_message(
+        {
+            "id": "msg_3",
+            "content": "/ingest_questions source_key=mock-001",
+            "author": {"user_openid": "openid_123"},
+        }
+    )
+
+    assert inbound is not None
+    asyncio.run(service.handle_inbound(inbound))
+    assert client.private_messages == [
+        ("openid_123", "Question bank upload requires pasted content after /ingest_questions.")
     ]
