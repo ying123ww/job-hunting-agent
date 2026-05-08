@@ -21,6 +21,9 @@ dev = [
   "pytest>=8.2.0",
 ]
 
+[project.scripts]
+interview-agent = "interview_agent.cli:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
