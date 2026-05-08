@@ -47,6 +47,11 @@ class QQQuestionIngestCommand:
     source_role: str | None
 
 
+@dataclass(slots=True)
+class QQAnalyzeGapsCommand:
+    limit: int = 3
+
+
 @contextmanager
 def _session_scope(container: AppContainer) -> Iterator[Any]:
     with container.db.session_scope() as session:
@@ -218,7 +223,8 @@ class QQBotService:
                 openid=message.openid,
                 text=(
                     "Send a text message to chat with the interview agent.\n"
-                    "Use /ingest_questions on the first line to upload a pasted question set."
+                    "Use /ingest_questions on the first line to upload a pasted question set.\n"
+                    "Use /analyze_gaps to review your current weak areas."
                 ),
             )
             return
@@ -230,7 +236,9 @@ class QQBotService:
                     "Question bank upload format:\n"
                     "/ingest_questions source_key=mock-001 company=ByteDance role=Backend\n"
                     "Redis 为什么单线程还这么快？\n"
-                    "我的答案：因为它是内存操作。"
+                    "我的答案：因为它是内存操作。\n\n"
+                    "Gap analysis format:\n"
+                    "/analyze_gaps limit=3"
                 ),
             )
             return
@@ -242,6 +250,14 @@ class QQBotService:
             return
         if ingest_command is not None:
             await self._handle_question_ingest(message, ingest_command)
+            return
+        try:
+            analyze_command = self._parse_analyze_gaps_command(text)
+        except ValueError as exc:
+            await self.client.send_private_text(openid=message.openid, text=str(exc))
+            return
+        if analyze_command is not None:
+            await self._handle_analyze_gaps(message, analyze_command)
             return
 
         with _session_scope(self.container) as session:
@@ -383,8 +399,24 @@ class QQBotService:
                 metadata={"source_key": command.source_key} if command.source_key else {},
                 source_company=command.source_company,
                 source_role=command.source_role,
-            )
+        )
         for reply in self._format_question_ingest_replies(result):
+            await self.client.send_private_text(openid=message.openid, text=reply)
+
+    async def _handle_analyze_gaps(
+        self,
+        message: QQInboundMessage,
+        command: QQAnalyzeGapsCommand,
+    ) -> None:
+        with _session_scope(self.container) as session:
+            overall_risk, gaps = self.container.diagnosis.analyze(
+                session,
+                user_id=self._user_id(message.openid),
+                jd_id=None,
+                limit=command.limit,
+                persist=True,
+            )
+        for reply in self._format_gap_analysis_replies(overall_risk, gaps):
             await self.client.send_private_text(openid=message.openid, text=reply)
 
     def _parse_question_ingest_command(self, text: str) -> QQQuestionIngestCommand | None:
@@ -425,6 +457,30 @@ class QQBotService:
             source_role=source_role,
         )
 
+    def _parse_analyze_gaps_command(self, text: str) -> QQAnalyzeGapsCommand | None:
+        lines = text.splitlines()
+        if not lines:
+            return None
+        first_line = lines[0].strip()
+        if not first_line.startswith("/analyze_gaps"):
+            return None
+
+        limit = 3
+        for token in first_line.split()[1:]:
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            if key != "limit":
+                continue
+            try:
+                parsed = int(value.strip())
+            except ValueError as exc:
+                raise ValueError("Gap analysis limit must be an integer between 1 and 10.") from exc
+            if parsed < 1 or parsed > 10:
+                raise ValueError("Gap analysis limit must be an integer between 1 and 10.")
+            limit = parsed
+        return QQAnalyzeGapsCommand(limit=limit)
+
     def _format_question_ingest_replies(self, result: Any) -> list[str]:
         summary = "\n".join(
             [
@@ -439,7 +495,20 @@ class QQBotService:
         detail_sections = [self._format_question_feedback(index, record) for index, record in enumerate(result.records, start=1)]
         if not detail_sections:
             return [summary]
-        return [summary, *self._chunk_reply_sections(detail_sections, max_chars=1500)]
+        return [summary, *self._chunk_reply_sections("逐题反馈：", detail_sections, max_chars=1500)]
+
+    def _format_gap_analysis_replies(self, overall_risk: str, gaps: list[Any]) -> list[str]:
+        summary = "\n".join(
+            [
+                "薄弱项分析完成。",
+                f"overall_risk={overall_risk}",
+                f"gap_count={len(gaps)}",
+            ]
+        )
+        if not gaps:
+            return [summary, "当前没有明显薄弱项，可以继续按现有节奏练习。"]
+        detail_sections = [self._format_gap_feedback(index, gap) for index, gap in enumerate(gaps, start=1)]
+        return [summary, *self._chunk_reply_sections("薄弱项详情：", detail_sections, max_chars=1500)]
 
     def _format_question_feedback(self, index: int, record: dict[str, Any]) -> str:
         user_answer = str(record.get("user_answer", "") or "").strip() or "未提供"
@@ -460,16 +529,28 @@ class QQBotService:
             ]
         )
 
-    def _chunk_reply_sections(self, sections: list[str], *, max_chars: int) -> list[str]:
+    def _format_gap_feedback(self, index: int, gap: Any) -> str:
+        repair_actions = "；".join(str(item) for item in getattr(gap, "repair_actions", []) if str(item).strip()) or "暂无"
+        return "\n".join(
+            [
+                f"第{index}项：{gap.dimension}",
+                f"严重度：{gap.severity}",
+                f"优先级：{gap.priority_score}",
+                f"原因：{gap.why_it_matters}",
+                f"修复动作：{repair_actions}",
+            ]
+        )
+
+    def _chunk_reply_sections(self, title: str, sections: list[str], *, max_chars: int) -> list[str]:
         chunks: list[str] = []
-        current = "逐题反馈："
+        current = title
         for section in sections:
             candidate = f"{current}\n\n{section}" if current else section
-            if current != "逐题反馈：" and len(candidate) > max_chars:
+            if current != title and len(candidate) > max_chars:
                 chunks.append(current)
                 current = section
                 continue
-            if current == "逐题反馈：" and len(candidate) > max_chars:
+            if current == title and len(candidate) > max_chars:
                 chunks.append(candidate)
                 current = ""
                 continue

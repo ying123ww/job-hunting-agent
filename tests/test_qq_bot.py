@@ -102,6 +102,40 @@ class FakeQuestionIngestion:
         )
 
 
+class FakeDiagnosis:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def analyze(self, session, *, user_id: str, jd_id: str | None, limit: int, persist: bool = True):
+        self.calls.append(
+            {
+                "user_id": user_id,
+                "jd_id": jd_id,
+                "limit": limit,
+                "persist": persist,
+            }
+        )
+        return (
+            "medium",
+            [
+                SimpleNamespace(
+                    dimension="backend_basic",
+                    severity="high",
+                    priority_score=0.82,
+                    why_it_matters="这个维度重复暴露短板，会直接影响后端面试表现。",
+                    repair_actions=["补齐 Redis 和 MySQL 高频题答案框架", "做一次 10 分钟口述复盘"],
+                ),
+                SimpleNamespace(
+                    dimension="system_design",
+                    severity="medium",
+                    priority_score=0.61,
+                    why_it_matters="系统设计回答还不够稳定，容易在追问时失分。",
+                    repair_actions=["按四步模板重做一道系统设计题"],
+                ),
+            ],
+        )
+
+
 def _settings(**overrides):
     base = {
         "qqbot_gateway_backoff_sec": 5,
@@ -118,6 +152,7 @@ def test_qq_bot_handles_c2c_message() -> None:
         db=FakeDB(),
         agent_runtime=runtime,
         question_ingestion=FakeQuestionIngestion(),
+        diagnosis=FakeDiagnosis(),
     )
     service = QQBotService(
         container=container,
@@ -147,6 +182,7 @@ def test_qq_bot_ignores_empty_content() -> None:
         db=FakeDB(),
         agent_runtime=FakeAgentRuntime(),
         question_ingestion=FakeQuestionIngestion(),
+        diagnosis=FakeDiagnosis(),
     )
     service = QQBotService(
         container=container,
@@ -172,6 +208,7 @@ def test_qq_bot_blocks_openid_not_in_allowlist() -> None:
         db=FakeDB(),
         agent_runtime=runtime,
         question_ingestion=FakeQuestionIngestion(),
+        diagnosis=FakeDiagnosis(),
     )
     service = QQBotService(
         container=container,
@@ -202,6 +239,7 @@ def test_qq_bot_allows_openid_in_allowlist() -> None:
         db=FakeDB(),
         agent_runtime=runtime,
         question_ingestion=FakeQuestionIngestion(),
+        diagnosis=FakeDiagnosis(),
     )
     service = QQBotService(
         container=container,
@@ -229,6 +267,7 @@ def test_qq_bot_failure_notifies_user() -> None:
         db=FakeDB(),
         agent_runtime=FakeAgentRuntime(),
         question_ingestion=FakeQuestionIngestion(),
+        diagnosis=FakeDiagnosis(),
     )
     service = QQBotService(
         container=container,
@@ -265,6 +304,7 @@ def test_qq_bot_ingests_question_bank_from_command() -> None:
         db=FakeDB(),
         agent_runtime=runtime,
         question_ingestion=ingestion,
+        diagnosis=FakeDiagnosis(),
     )
     service = QQBotService(
         container=container,
@@ -316,6 +356,7 @@ def test_qq_bot_ingest_command_requires_body() -> None:
         db=FakeDB(),
         agent_runtime=FakeAgentRuntime(),
         question_ingestion=FakeQuestionIngestion(),
+        diagnosis=FakeDiagnosis(),
     )
     service = QQBotService(
         container=container,
@@ -335,4 +376,79 @@ def test_qq_bot_ingest_command_requires_body() -> None:
     asyncio.run(service.handle_inbound(inbound))
     assert client.private_messages == [
         ("openid_123", "Question bank upload requires pasted content after /ingest_questions.")
+    ]
+
+
+def test_qq_bot_analyzes_gaps_from_command() -> None:
+    client = FakeQQBotClient()
+    diagnosis = FakeDiagnosis()
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=FakeAgentRuntime(),
+        question_ingestion=FakeQuestionIngestion(),
+        diagnosis=diagnosis,
+    )
+    service = QQBotService(
+        container=container,
+        client=client,
+        settings=_settings(),
+    )
+
+    inbound = service.extract_inbound_message(
+        {
+            "id": "msg_4",
+            "content": "/analyze_gaps limit=2",
+            "author": {"user_openid": "openid_123"},
+        }
+    )
+
+    assert inbound is not None
+    asyncio.run(service.handle_inbound(inbound))
+
+    assert diagnosis.calls == [
+        {
+            "user_id": "qqbot_openid_123",
+            "jd_id": None,
+            "limit": 2,
+            "persist": True,
+        }
+    ]
+    assert client.private_messages == [
+        (
+            "openid_123",
+            "薄弱项分析完成。\noverall_risk=medium\ngap_count=2",
+        ),
+        (
+            "openid_123",
+            "薄弱项详情：\n\n第1项：backend_basic\n严重度：high\n优先级：0.82\n原因：这个维度重复暴露短板，会直接影响后端面试表现。\n修复动作：补齐 Redis 和 MySQL 高频题答案框架；做一次 10 分钟口述复盘\n\n第2项：system_design\n严重度：medium\n优先级：0.61\n原因：系统设计回答还不够稳定，容易在追问时失分。\n修复动作：按四步模板重做一道系统设计题",
+        ),
+    ]
+
+
+def test_qq_bot_analyze_gaps_rejects_invalid_limit() -> None:
+    client = FakeQQBotClient()
+    container = SimpleNamespace(
+        db=FakeDB(),
+        agent_runtime=FakeAgentRuntime(),
+        question_ingestion=FakeQuestionIngestion(),
+        diagnosis=FakeDiagnosis(),
+    )
+    service = QQBotService(
+        container=container,
+        client=client,
+        settings=_settings(),
+    )
+
+    inbound = service.extract_inbound_message(
+        {
+            "id": "msg_5",
+            "content": "/analyze_gaps limit=abc",
+            "author": {"user_openid": "openid_123"},
+        }
+    )
+
+    assert inbound is not None
+    asyncio.run(service.handle_inbound(inbound))
+    assert client.private_messages == [
+        ("openid_123", "Gap analysis limit must be an integer between 1 and 10.")
     ]
