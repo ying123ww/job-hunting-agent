@@ -384,17 +384,8 @@ class QQBotService:
                 source_company=command.source_company,
                 source_role=command.source_role,
             )
-        await self.client.send_private_text(
-            openid=message.openid,
-            text=(
-                "Question bank ingested successfully.\n"
-                f"processed={result.processed_count}\n"
-                f"deduped={len(result.records)}\n"
-                f"skipped={result.skipped_count}\n"
-                f"inactive={result.inactive_count}\n"
-                f"fallback={result.fallback_used}"
-            ),
-        )
+        for reply in self._format_question_ingest_replies(result):
+            await self.client.send_private_text(openid=message.openid, text=reply)
 
     def _parse_question_ingest_command(self, text: str) -> QQQuestionIngestCommand | None:
         lines = text.splitlines()
@@ -433,3 +424,56 @@ class QQBotService:
             source_company=source_company,
             source_role=source_role,
         )
+
+    def _format_question_ingest_replies(self, result: Any) -> list[str]:
+        summary = "\n".join(
+            [
+                "题库入库完成。",
+                f"processed={result.processed_count}",
+                f"deduped={len(result.records)}",
+                f"skipped={result.skipped_count}",
+                f"inactive={result.inactive_count}",
+                f"fallback={result.fallback_used}",
+            ]
+        )
+        detail_sections = [self._format_question_feedback(index, record) for index, record in enumerate(result.records, start=1)]
+        if not detail_sections:
+            return [summary]
+        return [summary, *self._chunk_reply_sections(detail_sections, max_chars=1500)]
+
+    def _format_question_feedback(self, index: int, record: dict[str, Any]) -> str:
+        user_answer = str(record.get("user_answer", "") or "").strip() or "未提供"
+        reference_answer = str(record.get("reference_answer", "") or "").strip() or "暂无"
+        topics = ", ".join(str(item) for item in record.get("topics", []) if str(item).strip()) or "未标注"
+        gaps = "；".join(str(item) for item in record.get("gaps", []) if str(item).strip()) or "暂无明显短板"
+        next_probe = "；".join(str(item) for item in record.get("next_probe", []) if str(item).strip()) or "暂无"
+        return "\n".join(
+            [
+                f"第{index}题：{record['question']}",
+                f"维度：{record['dimension']}",
+                f"知识点：{topics}",
+                f"你的回答：{user_answer}",
+                f"参考答案：{reference_answer}",
+                f"评估：{record['mastery_level']}",
+                f"薄弱点：{gaps}",
+                f"建议追问：{next_probe}",
+            ]
+        )
+
+    def _chunk_reply_sections(self, sections: list[str], *, max_chars: int) -> list[str]:
+        chunks: list[str] = []
+        current = "逐题反馈："
+        for section in sections:
+            candidate = f"{current}\n\n{section}" if current else section
+            if current != "逐题反馈：" and len(candidate) > max_chars:
+                chunks.append(current)
+                current = section
+                continue
+            if current == "逐题反馈：" and len(candidate) > max_chars:
+                chunks.append(candidate)
+                current = ""
+                continue
+            current = candidate
+        if current:
+            chunks.append(current)
+        return chunks

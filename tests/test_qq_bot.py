@@ -72,7 +72,30 @@ class FakeQuestionIngestion:
         )
         return SimpleNamespace(
             processed_count=2,
-            records=[{"question_id": "q1"}, {"question_id": "q2"}],
+            records=[
+                {
+                    "question_id": "q1",
+                    "question": "Redis 为什么单线程还这么快？",
+                    "user_answer": "因为它是内存操作。",
+                    "reference_answer": "应覆盖内存访问、IO 多路复用和高效数据结构。",
+                    "dimension": "backend_basic",
+                    "topics": ["Redis"],
+                    "mastery_level": "了解",
+                    "gaps": ["没有提到 IO 多路复用"],
+                    "next_probe": ["继续解释网络事件循环"],
+                },
+                {
+                    "question_id": "q2",
+                    "question": "MySQL 的索引为什么用 B+ 树不用 B 树？",
+                    "user_answer": "范围查询更方便。",
+                    "reference_answer": "应覆盖范围查询、叶子节点链表、树高和磁盘 IO。",
+                    "dimension": "backend_basic",
+                    "topics": ["MySQL"],
+                    "mastery_level": "熟悉",
+                    "gaps": ["没有展开磁盘 IO 成本"],
+                    "next_probe": ["对比 B 树和 B+ 树的磁盘访问次数"],
+                },
+            ],
             skipped_count=1,
             inactive_count=0,
             fallback_used=False,
@@ -278,8 +301,12 @@ def test_qq_bot_ingests_question_bank_from_command() -> None:
     assert client.private_messages == [
         (
             "openid_123",
-            "Question bank ingested successfully.\nprocessed=2\ndeduped=2\nskipped=1\ninactive=0\nfallback=False",
-        )
+            "题库入库完成。\nprocessed=2\ndeduped=2\nskipped=1\ninactive=0\nfallback=False",
+        ),
+        (
+            "openid_123",
+            "逐题反馈：\n\n第1题：Redis 为什么单线程还这么快？\n维度：backend_basic\n知识点：Redis\n你的回答：因为它是内存操作。\n参考答案：应覆盖内存访问、IO 多路复用和高效数据结构。\n评估：了解\n薄弱点：没有提到 IO 多路复用\n建议追问：继续解释网络事件循环\n\n第2题：MySQL 的索引为什么用 B+ 树不用 B 树？\n维度：backend_basic\n知识点：MySQL\n你的回答：范围查询更方便。\n参考答案：应覆盖范围查询、叶子节点链表、树高和磁盘 IO。\n评估：熟悉\n薄弱点：没有展开磁盘 IO 成本\n建议追问：对比 B 树和 B+ 树的磁盘访问次数",
+        ),
     ]
 
 

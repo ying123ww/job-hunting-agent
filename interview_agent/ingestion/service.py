@@ -521,6 +521,8 @@ class QuestionIngestionService:
                 {
                     "question_id": question.id,
                     "question": candidate.question,
+                    "user_answer": candidate.answer,
+                    "reference_answer": candidate.reference_answer,
                     "dimension": candidate.dimension,
                     "topics": candidate.topics,
                     "mastery_level": mastery_level,

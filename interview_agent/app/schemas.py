@@ -44,6 +44,8 @@ class IngestResponse(BaseModel):
 class QuestionRecordResponse(BaseModel):
     question_id: str
     question: str
+    user_answer: str
+    reference_answer: str
     dimension: str
     topics: list[str]
     mastery_level: str
