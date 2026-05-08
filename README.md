@@ -10,7 +10,7 @@
 
 - 入库 `resume`、`jd`、`questions`
 - 用 `documents` / `document_chunks` 维护可追溯证据链
-- 用 `SQLite + Chroma` 做结构化存储和向量检索
+- 用 `SQLite + Chroma + SQLite FTS5` 做结构化存储、混合检索和证据召回
 - 做一次 `Gap Analysis`
 - 生成当天计划与任务
 - 提供 `TickTick` dry-run 同步接口
@@ -20,6 +20,7 @@
 - `FastAPI`
 - `SQLAlchemy`
 - `SQLite`
+- `SQLite FTS5`
 - `Chroma`
 - `Pydantic Settings`
 - `PyPDF`
@@ -54,6 +55,14 @@ tests/          单测和服务层集成测试
 - `plans` / `tasks`
   存当天计划和任务
 
+其中 `questions` 现在同时承担“结构化题库记录”和“RAG 检索主索引”的角色，支持：
+
+- `normalized_text`
+- `question_fingerprint`
+- `source_scope`
+- `is_active`
+- `superseded_by`
+
 这样每条诊断结论都可以回溯到：
 
 ```json
@@ -74,11 +83,87 @@ tests/          单测和服务层集成测试
 - 默认检索只查 `active` 文档
 - 历史证据仍然保留，可继续追溯
 
+对于 `question` 类型，除了 `document` 版本管理外，还额外支持题目级别的增量治理：
+
+- 先按 `source_scope` 确定一批题的逻辑来源
+- 再按 `question_fingerprint` 判定是否为同一道题
+- 未变化题目会跳过，不重复建索引
+- 已变化题目会生成新版本，并让旧版本 `inactive`
+- 旧题库里本轮未出现的题，也会被标记为 `inactive`
+
+## RAG / Retrieval 逻辑
+
+当前题库与证据检索采用一套混合 RAG 管线。
+
+### 1. 入库阶段
+
+- `resume` / `jd` / `questions` 原文先进入 `documents`
+- 原文粗粒度切块后进入 `document_chunks`
+- `questions` 会优先走真实 LLM 做结构化抽取
+- 如果 LLM 不可用、返回坏结构或抽取失败，会自动退回规则解析 fallback
+
+结构化题目字段包括：
+
+- `question`
+- `answer`
+- `source_company`
+- `source_role`
+- `dimension`
+- `topics`
+- `reference_answer`
+
+### 2. 索引阶段
+
+系统维护两条检索 lane：
+
+- dense lane：`Chroma`
+- lexical lane：`SQLite FTS5`
+
+具体索引内容是：
+
+- `question_bank`
+  存题干、参考答案要点、topics、来源信息的向量表示
+- `interview_chunks`
+  存原始 chunk 证据，主要用于追溯和诊断引用
+- `retrieval_fts`
+  统一的 FTS5 检索表，索引 active 的题目和必要证据块
+
+这意味着系统既能做语义召回，也能做精确术语召回。
+
+### 3. 检索阶段
+
+查询时会先做 query rewrite，再并行走两条召回链路：
+
+- dense retrieval：从 `question_bank` / `interview_chunks` / `gap_memory` 做向量检索
+- lexical retrieval：从 `retrieval_fts` 做 `MATCH + bm25()` 全文检索
+
+随后在 service 层做：
+
+- metadata filter
+- 去重合并
+- question 优先于其 source chunk
+- rerank 排序
+
+默认只返回 `active` 的题和文档，避免旧版本污染结果。
+
+### 4. 重排阶段
+
+当前重排会综合这些信号：
+
+- dense score
+- lexical score
+- dimension match
+- source_type match
+- query lexical overlap
+
+因此它不是“只有向量检索”的简单 RAG，而是一套面向题库问答和短板诊断的 hybrid retrieval。
+
 ## LLM 策略
 
 系统提供统一的 OpenAI-compatible provider。
 
 - 如果配置了 `LLM_BASE_URL` 和 `LLM_API_KEY`，会走真实模型接口
+- 如果额外配置了 `EMBEDDING_BASE_URL` 和 `EMBEDDING_API_KEY`，embedding 可以单独走专用模型
 - 如果没有配置，会退化到本地 deterministic fallback
 
 这意味着：
@@ -177,6 +262,10 @@ http://127.0.0.1:8000
 
 - 题目解析
 - chunk 切分
+- LLM-first 题库入库与 fallback
+- question 增量去重 / 更新 / 失效治理
+- SQLite FTS5 lexical retrieval
+- hybrid retrieval merge / rerank
 - gap priority 计算
 - 服务层端到端闭环
 
