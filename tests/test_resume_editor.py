@@ -58,7 +58,7 @@ def test_compile_success_updates_state_and_exposes_pdf(monkeypatch, tmp_path) ->
     assert str(file_response.path).endswith("resume.pdf")
 
 
-def test_compile_uses_xelatex_format(monkeypatch, tmp_path) -> None:
+def test_compile_uses_default_tectonic_command(monkeypatch, tmp_path) -> None:
     request = _make_request(monkeypatch, tmp_path)
     service = request.app.state.container.resume_workspace
     settings = request.app.state.container.settings
@@ -90,8 +90,6 @@ def test_compile_uses_xelatex_format(monkeypatch, tmp_path) -> None:
         "/tmp/tectonic",
         "-X",
         "compile",
-        "--format",
-        "xelatex",
         "resume.tex",
         "--outdir",
         str(settings.resume_path),

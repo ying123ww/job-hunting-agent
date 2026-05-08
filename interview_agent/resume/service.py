@@ -231,8 +231,6 @@ class ResumeWorkspaceService:
                 compiler_path,
                 "-X",
                 "compile",
-                "--format",
-                "xelatex",
                 self.settings.resume_source_path.name,
                 "--outdir",
                 str(self.settings.resume_path),
@@ -314,7 +312,7 @@ class ResumeWorkspaceService:
         lines = [line.strip() for line in full_log.splitlines() if line.strip()]
         for line in lines:
             lowered = line.lower()
-            if line.startswith("!") or "error" in lowered:
+            if line.startswith("!") or lowered.startswith("error:") or lowered.startswith("fatal error"):
                 return line[:300]
         return (lines[-1] if lines else "LaTeX compilation failed.")[:300]
 
