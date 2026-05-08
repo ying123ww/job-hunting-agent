@@ -9,7 +9,10 @@ import type {
   PlanResponse,
   QuestionIngestPayload,
   QuestionIngestResponse,
+  ResumeCompileResponse,
   ResumeIngestPayload,
+  ResumeSourceResponse,
+  ResumeSourceUpdatePayload,
   SyncTickTickResponse,
   WorkspaceOverviewResponse,
 } from "../types/api";
@@ -34,9 +37,38 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function requestText(path: string, init?: RequestInit): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Request failed with status ${response.status}`);
+  }
+
+  return response.text();
+}
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
   getOverview: () => request<WorkspaceOverviewResponse>("/workspace/overview"),
+  getResumeSource: () => request<ResumeSourceResponse>("/resume/source"),
+  saveResumeSource: (payload: ResumeSourceUpdatePayload) =>
+    request<ResumeSourceResponse>("/resume/source", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  compileResume: () =>
+    request<ResumeCompileResponse>("/resume/compile", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  getResumeCompileLog: () => requestText("/resume/compile-log"),
+  getResumePdfUrl: () => `${API_BASE_URL}/resume/pdf`,
   getDocuments: (params: {
     source_type?: string;
     active_only?: boolean;

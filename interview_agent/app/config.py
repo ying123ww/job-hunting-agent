@@ -24,6 +24,7 @@ class AppSettings(BaseSettings):
     embedding_dimensions: int = Field(default=64)
     text_chunk_size: int = Field(default=600)
     text_chunk_overlap: int = Field(default=80)
+    tectonic_bin: str = Field(default="tectonic")
     dida365_enabled: bool = Field(default=False)
     dida365_access_token: str = Field(default="")
     dida365_project_id: str = Field(default="")
@@ -81,6 +82,26 @@ class AppSettings(BaseSettings):
         return Path(raw).resolve()
 
     @property
+    def resume_path(self) -> Path:
+        return (self.workspace_path / "resume").resolve()
+
+    @property
+    def resume_source_path(self) -> Path:
+        return (self.resume_path / "resume.tex").resolve()
+
+    @property
+    def resume_pdf_path(self) -> Path:
+        return (self.resume_path / "resume.pdf").resolve()
+
+    @property
+    def resume_compile_log_path(self) -> Path:
+        return (self.resume_path / "compile.log").resolve()
+
+    @property
+    def resume_state_path(self) -> Path:
+        return (self.resume_path / "state.json").resolve()
+
+    @property
     def sqlite_path(self) -> Path | None:
         prefix = "sqlite:///"
         database_url = self.resolved_database_url
@@ -122,6 +143,7 @@ class AppSettings(BaseSettings):
         self.workspace_path.mkdir(parents=True, exist_ok=True)
         self.chroma_path.mkdir(parents=True, exist_ok=True)
         self.memory_path.mkdir(parents=True, exist_ok=True)
+        self.resume_path.mkdir(parents=True, exist_ok=True)
         if self.sqlite_path is not None:
             self.sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 

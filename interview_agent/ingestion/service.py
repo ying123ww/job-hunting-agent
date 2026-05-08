@@ -118,6 +118,78 @@ class DocumentIngestionService:
                 ],
             )
 
+    def _delete_chunks(self, session, *, chunks: list[Any]) -> None:
+        grouped: dict[str, list[str]] = {}
+        for chunk in chunks:
+            grouped.setdefault(chunk.vector_collection, []).append(chunk.vector_id or chunk.id)
+            self.repository.delete_retrieval_fts(session, item_id=chunk.id)
+        for collection_name, ids in grouped.items():
+            self.vector_store.delete(collection_name=collection_name, ids=ids)
+
+    def _create_document_chunks(
+        self,
+        session,
+        *,
+        document_id: str,
+        user_id: str,
+        source_type: str,
+        text: str,
+        filename: str | None,
+        metadata: dict[str, Any],
+    ) -> int:
+        chunks = split_text(
+            text,
+            chunk_size=self.settings.text_chunk_size,
+            chunk_overlap=self.settings.text_chunk_overlap,
+        )
+        vector_ids: list[str] = []
+        texts: list[str] = []
+        metadatas: list[dict[str, Any]] = []
+        for index, chunk_text in enumerate(chunks):
+            metadata_json = {
+                **metadata,
+                "filename": filename,
+                "chunk_kind": "document",
+            }
+            chunk = self.repository.create_document_chunk(
+                session,
+                document_id=document_id,
+                user_id=user_id,
+                source_type=source_type,
+                chunk_index=index,
+                text=chunk_text,
+                metadata_json=metadata_json,
+                vector_collection="interview_chunks",
+                vector_id=None,
+            )
+            vector_ids.append(chunk.id)
+            texts.append(chunk_text)
+            metadatas.append(
+                {
+                    "user_id": user_id,
+                    "source_type": source_type,
+                    "document_id": document_id,
+                    "chunk_id": chunk.id,
+                    "question_id": "",
+                    "dimension": metadata.get("dimension", ""),
+                    "topics_text": metadata.get("topics_text", ""),
+                    "is_active": True,
+                }
+            )
+            chunk.vector_id = chunk.id
+        if texts:
+            self.vector_store.upsert(
+                collection_name="interview_chunks",
+                ids=vector_ids,
+                texts=texts,
+                metadatas=metadatas,
+            )
+            for chunk_id in vector_ids:
+                chunk = self.repository.get_document_chunk(session, chunk_id=chunk_id)
+                if chunk is not None:
+                    self._sync_chunk_fts(session, chunk=chunk)
+        return len(chunks)
+
     def ingest_document(
         self,
         session,
@@ -156,60 +228,18 @@ class DocumentIngestionService:
             )
             if old_chunks:
                 self._mark_chunks_inactive(session, chunks=old_chunks)
-        chunks = split_text(
-            extracted.text,
-            chunk_size=self.settings.text_chunk_size,
-            chunk_overlap=self.settings.text_chunk_overlap,
+        chunk_count = self._create_document_chunks(
+            session,
+            document_id=document.id,
+            user_id=user_id,
+            source_type=source_type,
+            text=extracted.text,
+            filename=extracted.filename,
+            metadata=metadata,
         )
-        vector_ids: list[str] = []
-        texts: list[str] = []
-        metadatas: list[dict[str, Any]] = []
-        for index, chunk_text in enumerate(chunks):
-            metadata_json = {
-                **metadata,
-                "filename": extracted.filename,
-                "chunk_kind": "document",
-            }
-            chunk = self.repository.create_document_chunk(
-                session,
-                document_id=document.id,
-                user_id=user_id,
-                source_type=source_type,
-                chunk_index=index,
-                text=chunk_text,
-                metadata_json=metadata_json,
-                vector_collection="interview_chunks",
-                vector_id=None,
-            )
-            vector_ids.append(chunk.id)
-            texts.append(chunk_text)
-            metadatas.append(
-                {
-                    "user_id": user_id,
-                    "source_type": source_type,
-                    "document_id": document.id,
-                    "chunk_id": chunk.id,
-                    "question_id": "",
-                    "dimension": metadata.get("dimension", ""),
-                    "topics_text": metadata.get("topics_text", ""),
-                    "is_active": True,
-                }
-            )
-            chunk.vector_id = chunk.id
-        if texts:
-            self.vector_store.upsert(
-                collection_name="interview_chunks",
-                ids=vector_ids,
-                texts=texts,
-                metadatas=metadatas,
-            )
-            for chunk_id in vector_ids:
-                chunk = self.repository.get_document_chunk(session, chunk_id=chunk_id)
-                if chunk is not None:
-                    self._sync_chunk_fts(session, chunk=chunk)
         return IngestedDocument(
             document_id=document.id,
-            chunk_count=len(chunks),
+            chunk_count=chunk_count,
             content_hash=content_hash,
             raw_text=extracted.text,
         )
@@ -226,6 +256,58 @@ class DocumentIngestionService:
                 metrics=dict(project["metrics"]),
                 raw_source_id=document_id,
             )
+
+    def replace_resume_representation(
+        self,
+        session,
+        *,
+        user_id: str,
+        text: str,
+        filename: str = "resume.tex",
+    ) -> IngestedDocument:
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        self.repository.ensure_user(session, user_id)
+        existing_documents = self.repository.list_documents(
+            session,
+            user_id=user_id,
+            source_type="resume",
+            active_only=False,
+            limit=None,
+        )
+        existing_ids = [document.id for document in existing_documents]
+        if existing_ids:
+            old_chunks = self.repository.list_chunks_for_documents(session, document_ids=existing_ids)
+            if old_chunks:
+                self._delete_chunks(session, chunks=old_chunks)
+            self.repository.delete_projects_for_source_documents(session, document_ids=existing_ids)
+            self.repository.delete_document_chunks(session, document_ids=existing_ids)
+            self.repository.delete_documents(session, document_ids=existing_ids)
+
+        document = self.repository.create_document(
+            session,
+            user_id=user_id,
+            source_type="resume",
+            filename=filename,
+            content_hash=content_hash,
+            raw_text=text,
+            metadata_json={"canonical_path": "resume/resume.tex"},
+        )
+        chunk_count = self._create_document_chunks(
+            session,
+            document_id=document.id,
+            user_id=user_id,
+            source_type="resume",
+            text=text,
+            filename=filename,
+            metadata={"canonical_path": "resume/resume.tex"},
+        )
+        self.persist_resume_side_effects(session, user_id=user_id, document_id=document.id, text=text)
+        return IngestedDocument(
+            document_id=document.id,
+            chunk_count=chunk_count,
+            content_hash=content_hash,
+            raw_text=text,
+        )
 
     def persist_jd_side_effects(
         self,

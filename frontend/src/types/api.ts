@@ -47,6 +47,26 @@ export interface IngestResponse {
   message: string;
 }
 
+export interface ResumeSourceResponse {
+  source: string;
+  last_saved_at: string | null;
+  last_compiled_at: string | null;
+  last_compile_status: string;
+  last_compile_error_summary: string | null;
+  last_resume_document_id: string | null;
+  compiler_available: boolean;
+  pdf_exists: boolean;
+}
+
+export interface ResumeCompileResponse {
+  last_compiled_at: string;
+  last_compile_status: string;
+  last_compile_error_summary: string | null;
+  compiler_available: boolean;
+  pdf_exists: boolean;
+  log_excerpt: string;
+}
+
 export interface QuestionRecordResponse {
   question_id: string;
   question: string;
@@ -121,6 +141,11 @@ export interface ResumeIngestPayload {
   content_base64?: string;
   filename?: string;
   metadata?: Record<string, unknown>;
+}
+
+export interface ResumeSourceUpdatePayload {
+  user_id?: string;
+  source: string;
 }
 
 export interface JDIngestPayload extends ResumeIngestPayload {

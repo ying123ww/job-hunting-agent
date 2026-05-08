@@ -12,6 +12,7 @@ from interview_agent.agent.memory import (
     WorkingMemoryState,
 )
 from interview_agent.app.config import AppSettings
+from interview_agent.resume.service import DEFAULT_RESUME_TEX
 from interview_agent.storage.database import DatabaseManager
 
 
@@ -22,10 +23,19 @@ _TEXT_FILES: dict[str, str] = {
     "memory/RECENT_CONTEXT.md": DEFAULT_RECENT_CONTEXT_MD,
     "memory/PENDING.md": "",
     "memory/NOW.md": DEFAULT_NOW_MD,
+    "resume/resume.tex": DEFAULT_RESUME_TEX,
+    "resume/compile.log": "",
 }
 
 _JSON_FILES: dict[str, object] = {
     "memory/WORKING_MEMORY.json": asdict(WorkingMemoryState()),
+    "resume/state.json": {
+        "last_saved_at": None,
+        "last_compiled_at": None,
+        "last_compile_status": "not_run",
+        "last_compile_error_summary": None,
+        "last_resume_document_id": None,
+    },
 }
 
 
@@ -80,6 +90,7 @@ def init_workspace(*, settings: AppSettings, force: bool = False) -> InitSummary
     _ensure_directory(workspace, summary=summary)
     _ensure_directory(settings.memory_path, summary=summary)
     _ensure_directory(settings.chroma_path, summary=summary)
+    _ensure_directory(settings.resume_path, summary=summary)
 
     for rel_path, content in _TEXT_FILES.items():
         _write_text_file(workspace / rel_path, content, force=force, summary=summary)

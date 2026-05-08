@@ -1,28 +1,32 @@
 <template>
   <div class="app-shell">
     <aside class="app-sidebar">
-      <div>
-        <p class="eyebrow">Interview Copilot</p>
-        <h1 class="brand-title">Workbench</h1>
-        <p class="sidebar-copy">
-          A web-first console for interview prep, gap diagnosis, and execution.
-        </p>
-      </div>
+      <div class="app-sidebar__main">
+        <div>
+          <p class="eyebrow">Interview Copilot</p>
+          <h1 class="brand-title">Workbench</h1>
+          <p class="sidebar-copy">
+            A web-first console for interview prep, gap diagnosis, and execution.
+          </p>
+        </div>
 
-      <el-menu
-        :default-active="route.path"
-        class="nav-menu"
-        router
-        background-color="transparent"
-        text-color="var(--ink-soft)"
-        active-text-color="var(--ink)"
-      >
-        <el-menu-item index="/dashboard">Dashboard</el-menu-item>
-        <el-menu-item index="/sources">Sources</el-menu-item>
-        <el-menu-item index="/diagnosis">Diagnosis</el-menu-item>
-        <el-menu-item index="/plan">Plan</el-menu-item>
-        <el-menu-item index="/chat">Chat</el-menu-item>
-      </el-menu>
+        <el-menu
+          :default-active="route.path"
+          class="nav-menu"
+          router
+          background-color="transparent"
+          text-color="var(--ink-soft)"
+          active-text-color="var(--ink)"
+        >
+          <el-menu-item index="/dashboard">Dashboard</el-menu-item>
+          <el-menu-item index="/sources">Sources</el-menu-item>
+          <el-menu-item index="/diagnosis">Diagnosis</el-menu-item>
+          <el-menu-item index="/plan">Plan</el-menu-item>
+          <el-menu-item index="/chat">Chat</el-menu-item>
+        </el-menu>
+
+        <slot name="sidebar-extra" />
+      </div>
 
       <div class="sidebar-footer">
         <span class="chip">{{ shellLabel }}</span>

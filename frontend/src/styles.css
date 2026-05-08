@@ -44,11 +44,20 @@ a {
 .app-sidebar {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow: auto;
   padding: 32px 24px;
   border-right: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 248, 237, 0.94), rgba(247, 240, 227, 0.8));
   backdrop-filter: blur(20px);
+}
+
+.app-sidebar__main {
+  display: grid;
+  gap: 18px;
 }
 
 .brand-title,
@@ -98,6 +107,8 @@ a {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 20px;
 }
 
 .chip {

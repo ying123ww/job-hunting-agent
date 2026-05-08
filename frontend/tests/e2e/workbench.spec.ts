@@ -11,4 +11,12 @@ test.describe("Interview Copilot Workbench", () => {
     await expect(page.getByText("Workbench")).toBeVisible();
     await expect(page.getByRole("button", { name: "Upload source" })).toBeVisible();
   });
+
+  test("supports the latex resume workflow", async ({ page }) => {
+    await page.goto("/sources");
+    await expect(page.getByRole("button", { name: /Resume/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Save source" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Compile PDF" })).toBeVisible();
+    await expect(page.getByText("PDF preview")).toBeVisible();
+  });
 });

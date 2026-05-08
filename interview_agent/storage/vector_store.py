@@ -74,6 +74,11 @@ class ChromaVectorStore:
             matches.append(VectorMatch(vector_id=vector_id, text=text, metadata=metadata or {}, score=score))
         return matches
 
+    def delete(self, *, collection_name: str, ids: list[str]) -> None:
+        if not ids:
+            return
+        self.collections[collection_name].delete(ids=ids)
+
     def _sanitize_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
         clean: dict[str, Any] = {}
         for key, value in metadata.items():

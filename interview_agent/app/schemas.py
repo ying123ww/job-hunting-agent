@@ -41,6 +41,31 @@ class IngestResponse(BaseModel):
     message: str
 
 
+class ResumeSourceUpdateRequest(BaseModel):
+    user_id: str | None = None
+    source: str
+
+
+class ResumeSourceResponse(BaseModel):
+    source: str
+    last_saved_at: datetime | None = None
+    last_compiled_at: datetime | None = None
+    last_compile_status: str
+    last_compile_error_summary: str | None = None
+    last_resume_document_id: str | None = None
+    compiler_available: bool
+    pdf_exists: bool
+
+
+class ResumeCompileResponse(BaseModel):
+    last_compiled_at: datetime
+    last_compile_status: str
+    last_compile_error_summary: str | None = None
+    compiler_available: bool
+    pdf_exists: bool
+    log_excerpt: str
+
+
 class QuestionRecordResponse(BaseModel):
     question_id: str
     question: str

@@ -259,6 +259,13 @@ class InterviewRepository:
         session.flush()
         return project
 
+    def delete_projects_for_source_documents(self, session: Session, *, document_ids: Sequence[str]) -> None:
+        if not document_ids:
+            return
+        session.query(Project).filter(Project.raw_source_id.in_(document_ids)).delete(
+            synchronize_session=False
+        )
+
     def create_question(
         self,
         session: Session,
@@ -575,6 +582,18 @@ class InterviewRepository:
             return []
         stmt = select(DocumentChunk).where(DocumentChunk.document_id.in_(document_ids))
         return list(session.scalars(stmt))
+
+    def delete_document_chunks(self, session: Session, *, document_ids: Sequence[str]) -> None:
+        if not document_ids:
+            return
+        session.query(DocumentChunk).filter(DocumentChunk.document_id.in_(document_ids)).delete(
+            synchronize_session=False
+        )
+
+    def delete_documents(self, session: Session, *, document_ids: Sequence[str]) -> None:
+        if not document_ids:
+            return
+        session.query(Document).filter(Document.id.in_(document_ids)).delete(synchronize_session=False)
 
     def list_active_document_chunks(
         self,

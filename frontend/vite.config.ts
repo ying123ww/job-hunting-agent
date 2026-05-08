@@ -30,6 +30,7 @@ export default defineConfig(() => {
       environment: "jsdom",
       globals: true,
       setupFiles: [],
+      include: ["tests/unit/**/*.spec.ts"],
     },
   };
 });

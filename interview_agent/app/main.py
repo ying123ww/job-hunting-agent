@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 
 from interview_agent.agent.runtime import AgentTurnRequest as RuntimeAgentTurnRequest
 from interview_agent.actions.ticktick import SyncMode
@@ -27,7 +27,10 @@ from interview_agent.app.schemas import (
     ProactiveTickResponse,
     QuestionIngestRequest,
     QuestionIngestResponse,
+    ResumeCompileResponse,
     ResumeIngestRequest,
+    ResumeSourceResponse,
+    ResumeSourceUpdateRequest,
     SyncTickTickRequest,
     SyncTickTickResponse,
     TaskResponse,
@@ -143,6 +146,19 @@ def _sync_mode(container: AppContainer) -> SyncMode:
     return "live" if container.settings.dida365_enabled else "dry_run"
 
 
+def _resume_source_response(snapshot) -> ResumeSourceResponse:
+    return ResumeSourceResponse(
+        source=snapshot.source,
+        last_saved_at=snapshot.last_saved_at,
+        last_compiled_at=snapshot.last_compiled_at,
+        last_compile_status=snapshot.last_compile_status,
+        last_compile_error_summary=snapshot.last_compile_error_summary,
+        last_resume_document_id=snapshot.last_resume_document_id,
+        compiler_available=snapshot.compiler_available,
+        pdf_exists=snapshot.pdf_exists,
+    )
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     settings = get_settings()
@@ -158,6 +174,10 @@ async def root() -> dict[str, object]:
         "docs": "/docs",
         "health": "/health",
         "endpoints": {
+            "resume_source": "/resume/source",
+            "resume_compile": "/resume/compile",
+            "resume_pdf": "/resume/pdf",
+            "resume_compile_log": "/resume/compile-log",
             "ingest_resume": "/ingest/resume",
             "ingest_jd": "/ingest/jd",
             "ingest_questions": "/ingest/questions",
@@ -179,31 +199,76 @@ async def favicon() -> Response:
     return Response(status_code=204)
 
 
+@router.get("/resume/source", response_model=ResumeSourceResponse)
+async def resume_source(http_request: Request) -> ResumeSourceResponse:
+    container = _container(http_request)
+    return _resume_source_response(container.resume_workspace.get_source_snapshot())
+
+
+@router.put("/resume/source", response_model=ResumeSourceResponse)
+async def save_resume_source(
+    http_request: Request,
+    request: ResumeSourceUpdateRequest,
+) -> ResumeSourceResponse:
+    container = _container(http_request)
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        result = container.resume_workspace.save_source(
+            session,
+            user_id=user_id,
+            source=request.source,
+        )
+        return _resume_source_response(result)
+
+
+@router.post("/resume/compile", response_model=ResumeCompileResponse)
+async def compile_resume(http_request: Request) -> ResumeCompileResponse:
+    container = _container(http_request)
+    result = container.resume_workspace.compile_source()
+    return ResumeCompileResponse(
+        last_compiled_at=result.last_compiled_at,
+        last_compile_status=result.last_compile_status,
+        last_compile_error_summary=result.last_compile_error_summary,
+        compiler_available=result.compiler_available,
+        pdf_exists=result.pdf_exists,
+        log_excerpt=result.log_excerpt,
+    )
+
+
+@router.get("/resume/pdf")
+async def resume_pdf(http_request: Request):
+    container = _container(http_request)
+    container.resume_workspace.ensure_workspace_files()
+    pdf_path = container.settings.resume_pdf_path
+    if not pdf_path.exists():
+        raise HTTPException(status_code=404, detail="Resume PDF has not been compiled yet.")
+    return FileResponse(pdf_path, media_type="application/pdf")
+
+
+@router.get("/resume/compile-log")
+async def resume_compile_log(http_request: Request) -> PlainTextResponse:
+    container = _container(http_request)
+    container.resume_workspace.ensure_workspace_files()
+    return PlainTextResponse(container.settings.resume_compile_log_path.read_text(encoding="utf-8"))
+
+
 @router.post("/ingest/resume", response_model=IngestResponse)
 async def ingest_resume(http_request: Request, request: ResumeIngestRequest) -> IngestResponse:
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
-        result = container.document_ingestion.ingest_document(
+        result = container.resume_workspace.save_imported_source(
             session,
             user_id=user_id,
-            source_type="resume",
             text=request.text,
             content_base64=request.content_base64,
             filename=request.filename,
-            metadata=request.metadata,
-        )
-        container.document_ingestion.persist_resume_side_effects(
-            session,
-            user_id=user_id,
-            document_id=result.document_id,
-            text=result.raw_text,
         )
         return IngestResponse(
-            document_id=result.document_id,
+            document_id=result.last_resume_document_id or "",
             chunk_count=result.chunk_count,
             content_hash=result.content_hash,
-            message="Resume ingested successfully.",
+            message="Resume source saved successfully.",
         )
 
 

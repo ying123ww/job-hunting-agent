@@ -176,6 +176,83 @@ tests/          单测和服务层集成测试
 
 ## 本地运行
 
+### 0. 最短启动路径
+
+如果你只是想尽快把后端和前端跑起来，直接用下面这套命令。
+
+第一步：在项目根目录准备后端环境
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e '.[dev]'
+cp .env.example .env
+.venv/bin/python -m interview_agent init --workspace ./workspace
+```
+
+如果你的 `tectonic` 在固定路径，例如：
+
+```text
+/home/ying/.local/bin/tectonic
+```
+
+建议在 `.env` 里显式配置：
+
+```bash
+INTERVIEW_AGENT_TECTONIC_BIN=/home/ying/.local/bin/tectonic
+```
+
+第二步：启动后端
+
+```bash
+.venv/bin/python -m interview_agent api --workspace ./workspace --reload
+```
+
+后端默认地址：
+
+```text
+http://127.0.0.1:8000
+```
+
+可选健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+第三步：新开一个终端，启动前端
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+前端默认地址：
+
+```text
+http://127.0.0.1:5173
+```
+
+第四步：打开浏览器进入：
+
+```text
+http://127.0.0.1:5173/sources
+```
+
+然后进入 `Sources -> Resume`。
+
+如果你已经把自己的 LaTeX 简历直接放到了：
+
+```text
+workspace/resume/resume.tex
+```
+
+那前端刷新后就会读到这份文件。第一次手动替换磁盘文件后，建议再执行一次：
+
+1. 刷新页面
+2. 点击 `Save source`
+3. 点击 `Compile PDF`
+
 ### 1. 创建虚拟环境
 
 ```bash
@@ -198,6 +275,7 @@ cp .env.example .env
 - `INTERVIEW_AGENT_CHROMA_DIR`
 - `INTERVIEW_AGENT_LLM_BASE_URL`
 - `INTERVIEW_AGENT_LLM_API_KEY`
+- `INTERVIEW_AGENT_TECTONIC_BIN`
 - `INTERVIEW_AGENT_CORS_ALLOW_ORIGINS`
 
 ### Workspace 模式
@@ -225,6 +303,9 @@ cp .env.example .env
 - `memory/PENDING.md`
 - `memory/NOW.md`
 - `memory/WORKING_MEMORY.json`
+- `resume/resume.tex`
+- `resume/compile.log`
+- `resume/state.json`
 - `app.db`
 - `chroma/`
 
@@ -334,7 +415,7 @@ npm run dev
 - `Dashboard`
   看 overview、top gaps、today plan 和 sync mode
 - `Sources`
-  上传 `Resume` / `JD` / `Questions`，并查看最近文档历史与预览
+  编辑 `Resume` 的 LaTeX 源码，上传 `JD` / `Questions`，并查看相关预览与历史
 - `Diagnosis`
   手动触发 gap analysis，查看薄弱项、修复建议和证据
 - `Plan`
@@ -346,12 +427,12 @@ npm run dev
 
 - 左栏：
   `Resume`、`JD`、`Questions` 三个 tab
-- 每个 tab 支持：
-  粘贴文本、上传文件、触发入库
-- 右栏：
-  最近文档历史列表
-- 点击文档后：
-  展示 `filename`、`created_at`、`content_hash` 和 `raw_text_preview`
+- `Resume` tab：
+  `resume.tex` 的 CodeMirror 编辑器、`Save source`、`Compile PDF`
+- `Resume` 右栏：
+  `Source / PDF` 切换、compile log、当前 canonical document 状态
+- `JD` / `Questions`：
+  保持文本/文件入库与右侧历史预览
 
 ## 测试
 
@@ -408,6 +489,11 @@ npm run test:e2e
 
 ### Workbench
 
+- `GET /resume/source`
+- `PUT /resume/source`
+- `POST /resume/compile`
+- `GET /resume/pdf`
+- `GET /resume/compile-log`
 - `GET /workspace/overview`
 - `GET /documents`
 - `GET /documents/{document_id}`

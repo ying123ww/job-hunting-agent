@@ -29,6 +29,7 @@ from interview_agent.memory2.memorizer import SemanticMemorizer
 from interview_agent.memory2.retriever import SemanticMemoryRetriever
 from interview_agent.memory2.store import SemanticMemoryStore
 from interview_agent.planning.service import PlanService
+from interview_agent.resume.service import ResumeWorkspaceService
 from interview_agent.retrieval.service import RetrievalService
 from interview_agent.storage.database import DatabaseManager
 from interview_agent.storage.repositories import InterviewRepository
@@ -47,6 +48,7 @@ class AppContainer:
     retrieval: RetrievalService
     diagnosis: GapAnalysisService
     planning: PlanService
+    resume_workspace: ResumeWorkspaceService
     ticktick: TickTickClient
     agent_event_bus: EventBus
     agent_memory: AgentMemoryStore
@@ -81,6 +83,10 @@ class AppContainer:
             repository=repository,
             retrieval=retrieval,
             vector_store=vector_store,
+        )
+        resume_workspace = ResumeWorkspaceService(
+            settings=settings,
+            document_ingestion=document_ingestion,
         )
         ticktick = build_ticktick_client(settings)
         planning = PlanService(
@@ -157,6 +163,7 @@ class AppContainer:
             retrieval=retrieval,
             diagnosis=diagnosis,
             planning=planning,
+            resume_workspace=resume_workspace,
             ticktick=ticktick,
             agent_event_bus=agent_event_bus,
             agent_memory=agent_memory,

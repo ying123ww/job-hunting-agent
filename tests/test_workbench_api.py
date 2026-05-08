@@ -7,6 +7,7 @@ from fastapi import HTTPException
 
 from interview_agent.app.config import get_settings
 from interview_agent.app.main import (
+    compile_resume,
     create_app,
     document_detail,
     documents,
@@ -14,9 +15,18 @@ from interview_agent.app.main import (
     ingest_jd,
     ingest_questions,
     ingest_resume,
+    resume_compile_log,
+    resume_pdf,
+    resume_source,
+    save_resume_source,
     workspace_overview,
 )
-from interview_agent.app.schemas import JDIngestRequest, QuestionIngestRequest, ResumeIngestRequest
+from interview_agent.app.schemas import (
+    JDIngestRequest,
+    QuestionIngestRequest,
+    ResumeIngestRequest,
+    ResumeSourceUpdateRequest,
+)
 from interview_agent.core.container import AppContainer
 
 
@@ -130,15 +140,15 @@ def test_documents_filtering_and_inactive_records(monkeypatch, tmp_path) -> None
     request = _make_request(monkeypatch, tmp_path)
 
     _run(
-        ingest_resume(
+        save_resume_source(
             request,
-            ResumeIngestRequest(filename="resume-v1.md", text="版本一：Redis"),
+            ResumeSourceUpdateRequest(source="版本一：Redis"),
         )
     )
     _run(
-        ingest_resume(
+        save_resume_source(
             request,
-            ResumeIngestRequest(filename="resume-v2.md", text="版本二：Redis + MySQL"),
+            ResumeSourceUpdateRequest(source="版本二：MySQL"),
         )
     )
     _run(
@@ -157,13 +167,11 @@ def test_documents_filtering_and_inactive_records(monkeypatch, tmp_path) -> None
     all_resumes = _run(documents(request, source_type="resume", active_only=False, limit=10))
 
     assert len(active_only) == 1
-    assert active_only[0].filename == "resume-v2.md"
+    assert active_only[0].filename == "resume.tex"
 
-    assert len(all_resumes) == 2
-    assert all_resumes[0].filename == "resume-v2.md"
+    assert len(all_resumes) == 1
+    assert all_resumes[0].filename == "resume.tex"
     assert all_resumes[0].is_active is True
-    assert all_resumes[1].filename == "resume-v1.md"
-    assert all_resumes[1].is_active is False
 
 
 def test_document_detail_and_not_found(monkeypatch, tmp_path) -> None:
@@ -199,3 +207,73 @@ def test_cors_allows_browser_and_electron_origins(monkeypatch, tmp_path) -> None
         "http://127.0.0.1:5173",
         "null",
     ]
+
+
+def test_resume_source_seeded_for_fresh_workspace(monkeypatch, tmp_path) -> None:
+    request = _make_request(monkeypatch, tmp_path)
+
+    response = _run(resume_source(request))
+
+    assert "\\documentclass" in response.source
+    assert response.last_resume_document_id is None
+    assert response.last_compile_status == "not_run"
+    assert response.pdf_exists is False
+
+
+def test_resume_source_save_replaces_prior_representation(monkeypatch, tmp_path) -> None:
+    request = _make_request(monkeypatch, tmp_path)
+
+    _run(save_resume_source(request, ResumeSourceUpdateRequest(source="版本一：Redis")))
+    saved = _run(save_resume_source(request, ResumeSourceUpdateRequest(source="版本二：MySQL")))
+
+    assert saved.last_resume_document_id
+    with request.app.state.container.db.session_scope() as session:
+        docs = request.app.state.container.repository.list_documents(
+            session,
+            user_id="u_demo",
+            source_type="resume",
+            active_only=False,
+            limit=10,
+        )
+        assert len(docs) == 1
+        assert docs[0].id == saved.last_resume_document_id
+        redis_matches = request.app.state.container.repository.lexical_search(
+            session,
+            user_id="u_demo",
+            query_text="Redis",
+            source_types=["resume"],
+            limit=5,
+        )
+        assert redis_matches == []
+        mysql_matches = request.app.state.container.repository.lexical_search(
+            session,
+            user_id="u_demo",
+            query_text="MySQL",
+            source_types=["resume"],
+            limit=5,
+        )
+        assert len(mysql_matches) >= 1
+
+
+def test_resume_compile_missing_compiler_returns_structured_error(monkeypatch, tmp_path) -> None:
+    request = _make_request(monkeypatch, tmp_path)
+    service = request.app.state.container.resume_workspace
+    monkeypatch.setattr(service, "_resolve_compiler_path", lambda: None)
+
+    response = _run(compile_resume(request))
+
+    assert response.last_compile_status == "missing_compiler"
+    assert "Tectonic" in (response.last_compile_error_summary or "")
+    log_text = _run(resume_compile_log(request))
+    assert "Tectonic" in log_text.body.decode("utf-8")
+
+
+def test_resume_pdf_not_found_before_compile(monkeypatch, tmp_path) -> None:
+    request = _make_request(monkeypatch, tmp_path)
+
+    try:
+        _run(resume_pdf(request))
+    except HTTPException as exc:
+        assert exc.status_code == 404
+    else:
+        raise AssertionError("Expected resume_pdf to raise HTTPException before the first compile.")

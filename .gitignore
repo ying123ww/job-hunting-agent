@@ -40,3 +40,5 @@ __pycache__/
 .data/
 .env
 CHANGELOG.md
+workspace/
+
