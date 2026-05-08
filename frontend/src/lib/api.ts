@@ -5,6 +5,7 @@ import type {
   GapAnalysisResponse,
   HealthResponse,
   IngestResponse,
+  JDRecordResponse,
   JDIngestPayload,
   PlanResponse,
   QuestionIngestPayload,
@@ -13,6 +14,7 @@ import type {
   ResumeIngestPayload,
   ResumeSourceResponse,
   ResumeSourceUpdatePayload,
+  ResumeTailorDraftResponse,
   SyncTickTickResponse,
   WorkspaceOverviewResponse,
 } from "../types/api";
@@ -55,7 +57,14 @@ async function requestText(path: string, init?: RequestInit): Promise<string> {
 
 export const api = {
   health: () => request<HealthResponse>("/health"),
-  getOverview: () => request<WorkspaceOverviewResponse>("/workspace/overview"),
+  getOverview: (jdId?: string) => {
+    const query = new URLSearchParams();
+    if (jdId) {
+      query.set("jd_id", jdId);
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<WorkspaceOverviewResponse>(`/workspace/overview${suffix}`);
+  },
   getResumeSource: () => request<ResumeSourceResponse>("/resume/source"),
   saveResumeSource: (payload: ResumeSourceUpdatePayload) =>
     request<ResumeSourceResponse>("/resume/source", {
@@ -69,6 +78,17 @@ export const api = {
     }),
   getResumeCompileLog: () => requestText("/resume/compile-log"),
   getResumePdfUrl: () => `${API_BASE_URL}/resume/pdf`,
+  getJDs: () => request<JDRecordResponse[]>("/jds"),
+  setCurrentJD: (jdId: string) =>
+    request<{ current_jd_id: string | null }>("/jds/current", {
+      method: "PUT",
+      body: JSON.stringify({ jd_id: jdId }),
+    }),
+  getResumeTailorDraft: (jdId?: string) =>
+    request<ResumeTailorDraftResponse>("/resume/tailor-draft", {
+      method: "POST",
+      body: JSON.stringify({ jd_id: jdId || null }),
+    }),
   getDocuments: (params: {
     source_type?: string;
     active_only?: boolean;
@@ -104,27 +124,41 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  currentDiagnosis: () => request<GapAnalysisResponse>("/diagnosis/current"),
-  analyzeGaps: (limit = 3) =>
+  currentDiagnosis: (jdId?: string) => {
+    const query = new URLSearchParams();
+    if (jdId) {
+      query.set("jd_id", jdId);
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<GapAnalysisResponse>(`/diagnosis/current${suffix}`);
+  },
+  analyzeGaps: (limit = 3, jdId?: string) =>
     request<GapAnalysisResponse>("/diagnosis/gap", {
       method: "POST",
-      body: JSON.stringify({ limit }),
+      body: JSON.stringify({ limit, jd_id: jdId || null }),
     }),
-  getTodayPlan: () => request<PlanResponse>("/plan/today"),
-  generatePlan: (gap_limit = 3) =>
+  getTodayPlan: (jdId?: string) => {
+    const query = new URLSearchParams();
+    if (jdId) {
+      query.set("jd_id", jdId);
+    }
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    return request<PlanResponse>(`/plan/today${suffix}`);
+  },
+  generatePlan: (gap_limit = 3, jdId?: string) =>
     request<PlanResponse>("/plan/generate", {
       method: "POST",
-      body: JSON.stringify({ gap_limit }),
+      body: JSON.stringify({ gap_limit, jd_id: jdId || null }),
     }),
   syncTickTick: (planId?: string) =>
     request<SyncTickTickResponse>("/plan/sync_ticktick", {
       method: "POST",
       body: JSON.stringify({ plan_id: planId || null }),
     }),
-  agentTurn: (message: string) =>
+  agentTurn: (message: string, jdId?: string) =>
     request<AgentTurnResponse>("/agent/turn", {
       method: "POST",
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, jd_id: jdId || null }),
     }),
 };
 

@@ -1,8 +1,11 @@
 from interview_agent.ingestion.parser import (
+    compose_jd_source_text,
     evaluate_answer,
+    extract_jd_requirements,
     infer_dimension,
     infer_topics,
     parse_question_batch,
+    split_jd_sections,
 )
 
 
@@ -43,3 +46,31 @@ def test_topic_dimension_and_answer_evaluation() -> None:
     assert mastery in {"熟练掌握", "部分掌握"}
     assert probes
     assert all(isinstance(item, str) for item in gaps)
+
+
+def test_split_jd_sections_extracts_description_and_requirements() -> None:
+    raw_text = """
+职位描述
+负责推荐系统后端服务开发，与算法团队协作推动上线。
+
+职位要求
+- 熟悉 Python / Go
+- 具备高并发系统设计能力
+""".strip()
+
+    description, requirements = split_jd_sections(raw_text)
+
+    assert description == "负责推荐系统后端服务开发，与算法团队协作推动上线。"
+    assert "- 熟悉 Python / Go" in requirements
+    assert "高并发系统设计能力" in requirements
+
+
+def test_extract_jd_requirements_prefers_requirement_section() -> None:
+    raw_text = compose_jd_source_text(
+        job_description="负责研发和跨团队协作。",
+        job_requirements="熟悉 Redis\n具备系统设计能力",
+    )
+
+    requirements = extract_jd_requirements(raw_text)
+
+    assert [item["text"] for item in requirements] == ["熟悉 Redis", "具备系统设计能力"]

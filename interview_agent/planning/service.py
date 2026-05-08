@@ -106,9 +106,9 @@ class PlanService:
                 cursor += timedelta(minutes=duration + 5)
         return GeneratedPlan(plan_id=plan.id, jd_id=jd_id, summary=summary, tasks=tasks)
 
-    def today(self, session: Session, *, user_id: str, day: date | None) -> GeneratedPlan | None:
+    def today(self, session: Session, *, user_id: str, jd_id: str | None, day: date | None) -> GeneratedPlan | None:
         target_day = day or date.today()
-        plan = self.repository.latest_plan(session, user_id=user_id)
+        plan = self.repository.latest_plan(session, user_id=user_id, jd_id=jd_id)
         if plan is None:
             return None
         tasks = [

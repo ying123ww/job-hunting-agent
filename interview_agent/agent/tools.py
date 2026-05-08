@@ -83,6 +83,7 @@ class SearchEvidenceTool:
             query_text=route.query_text,
             source_types=route.source_types,
             dimension=route.dimension,
+            jd_id=ctx.current_jd_id,
             limit=4,
         )
         return ToolResult(
@@ -131,7 +132,7 @@ class PlanTodayTool:
         self.planning = planning
 
     def run(self, ctx: ToolExecutionContext, arguments: dict[str, Any]) -> ToolResult:
-        plan = self.planning.today(ctx.session, user_id=ctx.user_id, day=None)
+        plan = self.planning.today(ctx.session, user_id=ctx.user_id, jd_id=ctx.current_jd_id, day=None)
         if plan is None or not plan.tasks:
             plan = self.planning.generate(
                 ctx.session,

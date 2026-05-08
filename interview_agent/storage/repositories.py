@@ -66,6 +66,9 @@ def build_chunk_searchable_text(chunk: DocumentChunk) -> str:
         str(metadata.get("source_company", "")),
         str(metadata.get("source_role", "")),
         str(metadata.get("dimension", "")),
+        str(metadata.get("company", "")),
+        str(metadata.get("role", "")),
+        str(metadata.get("url", "")),
     ]
     return "\n".join(part.strip() for part in parts if part and part.strip())
 
@@ -89,6 +92,7 @@ class InterviewRepository:
         user_id: str,
         target_roles: Sequence[str] | None = None,
         target_companies: Sequence[str] | None = None,
+        current_jd_id: str | None = None,
         weak_points: Sequence[str] | None = None,
         learning_preference: dict[str, Any] | None = None,
         latest_overall_risk: str | None = None,
@@ -106,6 +110,8 @@ class InterviewRepository:
             profile.target_roles = self._merge_unique(profile.target_roles, target_roles)
         if target_companies:
             profile.target_companies = self._merge_unique(profile.target_companies, target_companies)
+        if current_jd_id is not None:
+            profile.current_jd_id = current_jd_id
         if weak_points is not None:
             profile.weak_points = [item for item in weak_points if item]
         if learning_preference:
@@ -133,12 +139,16 @@ class InterviewRepository:
         if exclude_document_id:
             stmt = stmt.where(Document.id != exclude_document_id)
         if source_type == "jd":
-            company = metadata.get("company")
-            role = metadata.get("role")
-            if company:
-                stmt = stmt.where(func.json_extract(Document.metadata_json, "$.company") == company)
-            if role:
-                stmt = stmt.where(func.json_extract(Document.metadata_json, "$.role") == role)
+            url = metadata.get("url")
+            if url:
+                stmt = stmt.where(func.json_extract(Document.metadata_json, "$.url") == url)
+            else:
+                company = metadata.get("company")
+                role = metadata.get("role")
+                if company:
+                    stmt = stmt.where(func.json_extract(Document.metadata_json, "$.company") == company)
+                if role:
+                    stmt = stmt.where(func.json_extract(Document.metadata_json, "$.role") == role)
         elif source_type == "question":
             source_scope = metadata.get("source_scope")
             if not source_scope:
@@ -221,6 +231,9 @@ class InterviewRepository:
         document_id: str,
         company: str | None,
         role: str | None,
+        url: str | None,
+        job_description: str | None,
+        job_requirements: str | None,
         raw_text: str,
         structured_requirements: list[dict[str, Any]],
     ) -> TargetJD:
@@ -229,6 +242,9 @@ class InterviewRepository:
             document_id=document_id,
             company=company,
             role=role,
+            url=url,
+            job_description=job_description,
+            job_requirements=job_requirements,
             raw_text=raw_text,
             structured_requirements=structured_requirements,
         )
@@ -379,11 +395,28 @@ class InterviewRepository:
         stmt = select(AnswerRecord).where(AnswerRecord.question_id == question_id).order_by(desc(AnswerRecord.answered_at))
         return list(session.scalars(stmt))
 
+    def get_target_jd(self, session: Session, *, jd_id: str) -> TargetJD | None:
+        return session.get(TargetJD, jd_id)
+
     def latest_target_jd(self, session: Session, *, user_id: str, jd_id: str | None = None) -> TargetJD | None:
         if jd_id:
-            return session.get(TargetJD, jd_id)
+            return self.get_target_jd(session, jd_id=jd_id)
         stmt = select(TargetJD).where(TargetJD.user_id == user_id).order_by(desc(TargetJD.created_at)).limit(1)
         return session.scalars(stmt).first()
+
+    def resolve_target_jd(self, session: Session, *, user_id: str, requested_jd_id: str | None) -> TargetJD | None:
+        if requested_jd_id:
+            return self.get_target_jd(session, jd_id=requested_jd_id)
+        profile = self.get_user_profile(session, user_id=user_id)
+        if profile is not None and profile.current_jd_id:
+            current = self.get_target_jd(session, jd_id=profile.current_jd_id)
+            if current is not None:
+                return current
+        return self.latest_target_jd(session, user_id=user_id)
+
+    def list_target_jds(self, session: Session, *, user_id: str) -> list[TargetJD]:
+        stmt = select(TargetJD).where(TargetJD.user_id == user_id).order_by(desc(TargetJD.created_at))
+        return list(session.scalars(stmt))
 
     def create_gap_record(
         self,
@@ -391,6 +424,7 @@ class InterviewRepository:
         *,
         run_id: str,
         user_id: str,
+        jd_id: str | None,
         dimension: str,
         severity: str,
         priority_score: float,
@@ -403,6 +437,7 @@ class InterviewRepository:
         gap = GapRecord(
             run_id=run_id,
             user_id=user_id,
+            jd_id=jd_id,
             dimension=dimension,
             severity=severity,
             priority_score=priority_score,
@@ -426,17 +461,18 @@ class InterviewRepository:
         stmt = select(GapRecord).where(GapRecord.user_id == user_id).order_by(desc(GapRecord.created_at)).limit(limit)
         return list(session.scalars(stmt))
 
-    def latest_gap_run(self, session: Session, *, user_id: str, limit: int) -> list[GapRecord]:
-        stmt = select(GapRecord.run_id).where(GapRecord.user_id == user_id).order_by(desc(GapRecord.created_at)).limit(1)
+    def latest_gap_run(self, session: Session, *, user_id: str, jd_id: str | None = None, limit: int) -> list[GapRecord]:
+        stmt = select(GapRecord.run_id).where(GapRecord.user_id == user_id)
+        if jd_id is not None:
+            stmt = stmt.where(GapRecord.jd_id == jd_id)
+        stmt = stmt.order_by(desc(GapRecord.created_at)).limit(1)
         run_id = session.scalars(stmt).first()
         if run_id is None:
             return []
-        query = (
-            select(GapRecord)
-            .where(GapRecord.user_id == user_id, GapRecord.run_id == run_id)
-            .order_by(desc(GapRecord.priority_score))
-            .limit(limit)
-        )
+        query = select(GapRecord).where(GapRecord.user_id == user_id, GapRecord.run_id == run_id)
+        if jd_id is not None:
+            query = query.where(GapRecord.jd_id == jd_id)
+        query = query.order_by(desc(GapRecord.priority_score)).limit(limit)
         return list(session.scalars(query))
 
     def create_plan(
@@ -516,8 +552,11 @@ class InterviewRepository:
         )
         return list(session.scalars(stmt))
 
-    def latest_plan(self, session: Session, *, user_id: str) -> Plan | None:
-        stmt = select(Plan).where(Plan.user_id == user_id).order_by(desc(Plan.created_at)).limit(1)
+    def latest_plan(self, session: Session, *, user_id: str, jd_id: str | None = None) -> Plan | None:
+        stmt = select(Plan).where(Plan.user_id == user_id)
+        if jd_id is not None:
+            stmt = stmt.where(Plan.jd_id == jd_id)
+        stmt = stmt.order_by(desc(Plan.created_at)).limit(1)
         return session.scalars(stmt).first()
 
     def tasks_for_plan(self, session: Session, *, plan_id: str) -> list[Task]:

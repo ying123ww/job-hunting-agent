@@ -2,6 +2,7 @@
   <AppShell title="Dashboard">
     <template #header-actions>
       <div class="cta-row">
+        <CurrentJdPicker />
         <el-button type="primary" @click="router.push('/sources')">Upload source</el-button>
         <el-button @click="router.push('/diagnosis')">Run diagnosis</el-button>
         <el-button @click="router.push('/plan')">Generate plan</el-button>
@@ -42,6 +43,7 @@
           <p class="eyebrow">Latest gaps</p>
           <h3 class="section-title">Where the workbench thinks you are leaking signal</h3>
         </div>
+        <p class="muted-copy">Current JD: {{ currentJdLabel }}</p>
         <div class="gap-card" v-for="gap in overview?.top_gaps ?? []" :key="gap.gap_id">
           <div class="status-row">
             <el-tag class="severity-tag" :type="severityType(gap.severity)">{{ gap.severity }}</el-tag>
@@ -60,6 +62,7 @@
           <p class="eyebrow">Today</p>
           <h3 class="section-title">Plan summary</h3>
         </div>
+        <p class="muted-copy">Current JD: {{ currentJdLabel }}</p>
         <p class="muted-copy">{{ overview?.today_plan.summary ?? "No plan for today." }}</p>
         <div class="task-list">
           <article class="task-card" v-for="task in overview?.today_plan.tasks ?? []" :key="task.task_id">
@@ -78,17 +81,23 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from "vue";
 import { useQuery } from "@tanstack/vue-query";
 import { useRouter } from "vue-router";
 
 import AppShell from "../components/AppShell.vue";
+import CurrentJdPicker from "../components/CurrentJdPicker.vue";
 import OverviewCard from "../components/OverviewCard.vue";
+import { useCurrentJdSelection } from "../composables/useCurrentJdSelection";
 import { api } from "../lib/api";
+import { useWorkbenchStore } from "../stores/workbench";
 
 const router = useRouter();
+const store = useWorkbenchStore();
+const { currentJdLabel } = useCurrentJdSelection();
 const { data: overview } = useQuery({
-  queryKey: ["overview"],
-  queryFn: () => api.getOverview(),
+  queryKey: computed(() => ["overview", store.selectedJdId]),
+  queryFn: () => api.getOverview(store.selectedJdId || undefined),
 });
 
 function severityType(severity: string) {

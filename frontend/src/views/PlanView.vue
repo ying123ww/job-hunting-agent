@@ -2,6 +2,7 @@
   <AppShell title="Plan">
     <template #header-actions>
       <div class="cta-row">
+        <CurrentJdPicker />
         <el-input-number v-model="gapLimit" :min="1" :max="10" />
         <el-button type="primary" :loading="generatePending" @click="generatePlan">
           Generate today plan
@@ -15,6 +16,7 @@
         <p class="eyebrow">Execution</p>
         <h3 class="section-title">Today’s active tasks</h3>
       </div>
+      <p class="muted-copy">Current JD: {{ currentJdLabel }}</p>
       <p class="muted-copy">{{ plan?.summary ?? "No plan for today." }}</p>
       <p class="desktop-note" v-if="lastSyncMode">
         Last sync mode in this session: <strong>{{ lastSyncMode }}</strong>
@@ -44,21 +46,26 @@ import { computed, ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 
 import AppShell from "../components/AppShell.vue";
+import CurrentJdPicker from "../components/CurrentJdPicker.vue";
+import { useCurrentJdSelection } from "../composables/useCurrentJdSelection";
 import { api } from "../lib/api";
+import { useWorkbenchStore } from "../stores/workbench";
 
 const gapLimit = ref(3);
 const lastSyncMode = ref<"dry_run" | "live" | "">("");
 const queryClient = useQueryClient();
+const store = useWorkbenchStore();
+const { currentJdLabel } = useCurrentJdSelection();
 
 const { data: plan } = useQuery({
-  queryKey: ["plan", "today"],
-  queryFn: () => api.getTodayPlan(),
+  queryKey: computed(() => ["plan", "today", store.selectedJdId]),
+  queryFn: () => api.getTodayPlan(store.selectedJdId || undefined),
 });
 
 const generateMutation = useMutation({
-  mutationFn: () => api.generatePlan(gapLimit.value),
+  mutationFn: () => api.generatePlan(gapLimit.value, store.selectedJdId || undefined),
   onSuccess: async (data) => {
-    queryClient.setQueryData(["plan", "today"], data);
+    queryClient.setQueryData(["plan", "today", store.selectedJdId], data);
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });

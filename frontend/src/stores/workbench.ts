@@ -27,7 +27,9 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   const resumeDraft = ref("");
   const resumePaneRatio = ref(clampResumePaneRatio(uiPrefs.resumePaneRatio ?? 0.42));
   const resumeCompileLogExpanded = ref(Boolean(uiPrefs.resumeCompileLogExpanded));
-  const jdDraft = ref("");
+  const jdDescriptionDraft = ref("");
+  const jdRequirementsDraft = ref("");
+  const jdUrlDraft = ref("");
   const questionDraft = ref("");
   const jdCompanyDraft = ref("");
   const jdRoleDraft = ref("");
@@ -66,6 +68,10 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     resumeCompileLogExpanded.value = value;
   }
 
+  function setSelectedJdId(value: string) {
+    selectedJdId.value = value;
+  }
+
   function appendUserMessage(content: string) {
     chatTranscript.value.push({
       id: crypto.randomUUID(),
@@ -97,8 +103,10 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     currentSourceTab,
     hasChatTranscript,
     jdCompanyDraft,
-    jdDraft,
+    jdDescriptionDraft,
+    jdRequirementsDraft,
     jdRoleDraft,
+    jdUrlDraft,
     lastQuestionIngest,
     questionCompanyDraft,
     questionDraft,
@@ -110,6 +118,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     selectedJdId,
     setResumeCompileLogExpanded,
     setResumePaneRatio,
+    setSelectedJdId,
     appendAssistantMessage,
     appendUserMessage,
     resetChat,

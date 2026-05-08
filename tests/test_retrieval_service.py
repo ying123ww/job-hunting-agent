@@ -3,6 +3,16 @@ from interview_agent.retrieval.service import RetrievalService
 from interview_agent.storage.vector_store import VectorMatch
 
 
+class FakeRepository:
+    def latest_target_jd(self, session, *, user_id: str, jd_id: str | None = None):
+        if jd_id == "jd_1":
+            return type("JD", (), {"document_id": "doc_jd_1"})()
+        return None
+
+    def lexical_search(self, session, *, user_id: str, query_text: str, source_types, limit: int):
+        return []
+
+
 class FakeVectorStore:
     def __init__(self) -> None:
         self.queries: list[tuple[str, str]] = []
@@ -38,6 +48,32 @@ class FakeVectorStore:
                     "topics_text": "Redis,缓存",
                 },
                 score=0.7,
+            ),
+            VectorMatch(
+                vector_id="chunk_jd_1",
+                text="JD 1 强调 Redis 与缓存设计。",
+                metadata={
+                    "source_type": "jd",
+                    "document_id": "doc_jd_1",
+                    "chunk_id": "chunk_jd_1",
+                    "dimension": "backend_basic",
+                    "question_id": "",
+                    "topics_text": "Redis,缓存",
+                },
+                score=0.68,
+            ),
+            VectorMatch(
+                vector_id="chunk_jd_2",
+                text="JD 2 强调系统设计与高并发。",
+                metadata={
+                    "source_type": "jd",
+                    "document_id": "doc_jd_2",
+                    "chunk_id": "chunk_jd_2",
+                    "dimension": "system_design",
+                    "question_id": "",
+                    "topics_text": "系统设计,高并发",
+                },
+                score=0.67,
             ),
             VectorMatch(
                 vector_id="chunk_resume_dup",
@@ -95,7 +131,32 @@ def test_build_evidence_bundle_uses_multi_lane_queries_and_dedupes(tmp_path) -> 
         limit=4,
     )
 
-    assert len(evidence) == 2
+    assert len(evidence) == 4
     assert evidence[0].source_type == "gap_record"
     assert evidence[0].score >= evidence[1].score
+    assert len([item for item in evidence if item.source_type == "resume"]) == 1
+    assert len([item for item in evidence if item.source_type == "jd"]) == 2
     assert len(vector_store.queries) >= 3
+
+
+def test_build_evidence_bundle_filters_jd_hits_to_selected_document(tmp_path) -> None:
+    memory_store = AgentMemoryStore(tmp_path / "memory")
+    working = memory_store.read_working_memory()
+    working.current_goal = "针对 JD 1 改简历"
+    memory_store.write_working_memory(working)
+
+    retrieval = RetrievalService(repository=FakeRepository(), vector_store=FakeVectorStore())  # type: ignore[arg-type]
+    evidence = retrieval.build_evidence_bundle(
+        object(),
+        user_id="u_demo",
+        query_text="Redis 相关经历怎么改写？",
+        source_types=["resume", "jd"],
+        jd_id="jd_1",
+        memory_snapshot=memory_store.snapshot(),
+        limit=6,
+    )
+
+    jd_evidence = [item for item in evidence if item.source_type == "jd"]
+
+    assert jd_evidence
+    assert {item.document_id for item in jd_evidence} == {"doc_jd_1"}

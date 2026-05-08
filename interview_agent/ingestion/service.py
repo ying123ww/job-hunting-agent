@@ -318,6 +318,9 @@ class DocumentIngestionService:
         text: str,
         company: str | None,
         role: str | None,
+        url: str | None,
+        job_description: str | None,
+        job_requirements: str | None,
     ):
         requirements = extract_jd_requirements(text)
         jd = self.repository.create_target_jd(
@@ -326,6 +329,9 @@ class DocumentIngestionService:
             document_id=document_id,
             company=company,
             role=role,
+            url=url,
+            job_description=job_description,
+            job_requirements=job_requirements,
             raw_text=text,
             structured_requirements=requirements,
         )

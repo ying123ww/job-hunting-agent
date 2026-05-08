@@ -27,6 +27,27 @@ class ResumeIngestRequest(BaseIngestRequest):
 class JDIngestRequest(BaseIngestRequest):
     company: str | None = None
     role: str | None = None
+    url: str | None = None
+    job_description: str | None = None
+    job_requirements: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_text_from_sections(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        if data.get("text") or data.get("content_base64"):
+            return data
+        description = str(data.get("job_description") or "").strip()
+        requirements = str(data.get("job_requirements") or "").strip()
+        sections: list[str] = []
+        if description:
+            sections.append(f"职位描述\n{description}")
+        if requirements:
+            sections.append(f"职位要求\n{requirements}")
+        if not sections:
+            return data
+        return {**data, "text": "\n\n".join(sections)}
 
 
 class QuestionIngestRequest(BaseIngestRequest):
@@ -115,6 +136,7 @@ class GapAnalysisRequest(BaseModel):
 
 
 class GapAnalysisResponse(BaseModel):
+    jd_id: str | None = None
     overall_risk: str
     generated_at: datetime
     top_gaps: list[GapResponse]
@@ -165,6 +187,39 @@ class WorkspaceOverviewResponse(BaseModel):
     top_gaps: list[GapResponse]
     today_plan: PlanResponse
     ticktick_sync_mode: Literal["dry_run", "live"]
+
+
+class JDRecordResponse(BaseModel):
+    jd_id: str
+    document_id: str | None = None
+    company: str | None = None
+    role: str | None = None
+    url: str | None = None
+    job_description: str | None = None
+    job_requirements: str | None = None
+    created_at: datetime
+    is_current: bool
+
+
+class CurrentJDUpdateRequest(BaseModel):
+    user_id: str | None = None
+    jd_id: str
+
+
+class CurrentJDUpdateResponse(BaseModel):
+    current_jd_id: str | None = None
+
+
+class ResumeTailorDraftRequest(BaseModel):
+    user_id: str | None = None
+    jd_id: str | None = None
+
+
+class ResumeTailorDraftResponse(BaseModel):
+    jd_id: str | None = None
+    summary: str
+    highlighted_keywords: list[str]
+    suggestions: list[str]
 
 
 class SyncTickTickRequest(BaseModel):

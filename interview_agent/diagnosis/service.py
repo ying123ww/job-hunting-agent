@@ -110,6 +110,7 @@ class GapAnalysisService:
                 query_text=query_text,
                 source_types=["resume", "jd", "question"],
                 dimension=dimension,
+                jd_id=jd.id if jd is not None else None,
                 limit=4,
             )
             repair_actions = self._repair_actions(dimension=dimension, questions=items)
@@ -129,6 +130,7 @@ class GapAnalysisService:
                     session,
                     run_id=run_id,
                     user_id=user_id,
+                    jd_id=jd.id if jd is not None else None,
                     dimension=dimension,
                     severity=severity,
                     priority_score=priority_score,
@@ -178,8 +180,15 @@ class GapAnalysisService:
         )
         return overall_risk, top_gaps
 
-    def current(self, session: Session, *, user_id: str, limit: int) -> tuple[str, list[DiagnosedGap]]:
-        records = self.repository.latest_gap_run(session, user_id=user_id, limit=limit)
+    def current(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        jd_id: str | None,
+        limit: int,
+    ) -> tuple[str, list[DiagnosedGap]]:
+        records = self.repository.latest_gap_run(session, user_id=user_id, jd_id=jd_id, limit=limit)
         gaps = [
             DiagnosedGap(
                 gap_id=record.id,

@@ -60,6 +60,17 @@ class DatabaseManager:
             "is_active": "BOOLEAN NOT NULL DEFAULT 1",
             "superseded_by": "TEXT",
         }
+        user_profile_columns = {
+            "current_jd_id": "TEXT",
+        }
+        target_jd_columns = {
+            "url": "TEXT",
+            "job_description": "TEXT",
+            "job_requirements": "TEXT",
+        }
+        gap_record_columns = {
+            "jd_id": "TEXT",
+        }
         with self.engine.begin() as connection:
             existing_columns = {
                 row[1]
@@ -69,6 +80,33 @@ class DatabaseManager:
                 if name in existing_columns:
                     continue
                 connection.execute(text(f"ALTER TABLE questions ADD COLUMN {name} {ddl}"))
+
+            profile_columns = {
+                row[1]
+                for row in connection.execute(text("PRAGMA table_info(user_profiles)")).all()
+            }
+            for name, ddl in user_profile_columns.items():
+                if name in profile_columns:
+                    continue
+                connection.execute(text(f"ALTER TABLE user_profiles ADD COLUMN {name} {ddl}"))
+
+            jd_columns = {
+                row[1]
+                for row in connection.execute(text("PRAGMA table_info(target_jds)")).all()
+            }
+            for name, ddl in target_jd_columns.items():
+                if name in jd_columns:
+                    continue
+                connection.execute(text(f"ALTER TABLE target_jds ADD COLUMN {name} {ddl}"))
+
+            gap_columns = {
+                row[1]
+                for row in connection.execute(text("PRAGMA table_info(gap_records)")).all()
+            }
+            for name, ddl in gap_record_columns.items():
+                if name in gap_columns:
+                    continue
+                connection.execute(text(f"ALTER TABLE gap_records ADD COLUMN {name} {ddl}"))
 
             connection.execute(
                 text(
@@ -80,6 +118,18 @@ class DatabaseManager:
                 text(
                     "CREATE INDEX IF NOT EXISTS ix_questions_user_fingerprint_active "
                     "ON questions (user_id, question_fingerprint, is_active)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_target_jds_user_url "
+                    "ON target_jds (user_id, url)"
+                )
+            )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_gap_records_user_jd_created "
+                    "ON gap_records (user_id, jd_id, created_at)"
                 )
             )
             connection.execute(

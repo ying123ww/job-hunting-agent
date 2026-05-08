@@ -1,5 +1,9 @@
 <template>
   <AppShell title="Sources">
+    <template #header-actions>
+      <CurrentJdPicker />
+    </template>
+
     <template #sidebar-extra>
       <div class="sources-sidebar-block">
         <p class="eyebrow">Sources</p>
@@ -27,6 +31,9 @@
             Current document: {{ resumeSourceData?.last_resume_document_id ?? "Not saved yet" }}
           </p>
           <p class="muted-copy sources-sidebar-status__meta">
+            Current JD anchor: {{ currentJdLabel }}
+          </p>
+          <p class="muted-copy sources-sidebar-status__meta">
             Last compile: {{ formatTimestamp(resumeStatus.last_compiled_at) }}
           </p>
           <div class="sources-sidebar-status__actions">
@@ -39,6 +46,9 @@
               @click="submitResumeCompile"
             >
               Compile PDF
+            </el-button>
+            <el-button :loading="resumeTailorPending" :disabled="!currentJd" @click="generateResumeTailorDraft">
+              Generate JD draft
             </el-button>
           </div>
           <p class="muted-copy sources-sidebar-status__meta">
@@ -90,6 +100,26 @@
             :empty-message="resumePdfEmptyMessage"
           />
 
+          <article v-if="resumeTailorDraft" class="detail-card resume-tailor-card">
+            <div class="resume-log-card__header">
+              <div>
+                <p class="eyebrow">Tailor draft</p>
+                <p class="muted-copy">{{ resumeTailorDraft.summary }}</p>
+              </div>
+              <span class="chip">{{ currentJdLabel }}</span>
+            </div>
+            <div class="pill-row" v-if="resumeTailorDraft.highlighted_keywords.length">
+              <span class="chip" v-for="keyword in resumeTailorDraft.highlighted_keywords" :key="keyword">
+                {{ keyword }}
+              </span>
+            </div>
+            <ul class="tailor-list">
+              <li v-for="suggestion in resumeTailorDraft.suggestions" :key="suggestion" class="muted-copy">
+                {{ suggestion }}
+              </li>
+            </ul>
+          </article>
+
           <article class="detail-card resume-log-card">
             <div class="resume-log-card__header">
               <div>
@@ -107,7 +137,10 @@
         </section>
       </div>
 
-      <div v-else class="split-layout">
+      <div
+        v-else
+        :class="store.currentSourceTab === 'jd' ? 'sources-stack-layout' : 'split-layout'"
+      >
         <section class="panel section-stack">
           <div>
             <p class="eyebrow">Ingestion</p>
@@ -118,11 +151,18 @@
             <div class="section-stack">
               <el-input v-model="store.jdCompanyDraft" placeholder="Company" />
               <el-input v-model="store.jdRoleDraft" placeholder="Role" />
+              <el-input v-model="store.jdUrlDraft" placeholder="Posting URL" />
               <el-input
-                v-model="store.jdDraft"
+                v-model="store.jdDescriptionDraft"
                 type="textarea"
-                :rows="10"
-                placeholder="Paste the job description text."
+                :rows="6"
+                placeholder="Paste the position description."
+              />
+              <el-input
+                v-model="store.jdRequirementsDraft"
+                type="textarea"
+                :rows="8"
+                placeholder="Paste the position requirements."
               />
               <input type="file" @change="onJdFile" />
               <div class="form-actions">
@@ -180,6 +220,7 @@
           <div class="document-list">
             <article
               class="document-card"
+              :class="{ 'is-selected': store.selectedDocumentId === doc.document_id }"
               v-for="doc in documentsData ?? []"
               :key="doc.document_id"
               @click="selectDocument(doc.document_id)"
@@ -188,25 +229,53 @@
                 <span class="chip">{{ doc.source_type }}</span>
                 <span class="chip">{{ doc.is_active ? "active" : "inactive" }}</span>
               </div>
-              <h4>{{ doc.filename || doc.document_id }}</h4>
+              <h4>{{ documentTitle(doc) }}</h4>
               <p class="muted-copy">{{ new Date(doc.created_at).toLocaleString() }}</p>
             </article>
           </div>
 
           <article v-if="selectedDocument" class="detail-card">
             <p class="eyebrow">Preview</p>
-            <h4>{{ selectedDocument.filename || selectedDocument.document_id }}</h4>
+            <h4>{{ documentTitle(selectedDocument) }}</h4>
             <dl class="metadata-grid">
-              <div>
-                <dt>Content hash</dt>
-                <dd>{{ selectedDocument.content_hash }}</dd>
+              <div v-if="metadataString(selectedDocument.metadata, 'company')">
+                <dt>Company</dt>
+                <dd>{{ metadataString(selectedDocument.metadata, "company") }}</dd>
+              </div>
+              <div v-if="metadataString(selectedDocument.metadata, 'role')">
+                <dt>Role</dt>
+                <dd>{{ metadataString(selectedDocument.metadata, "role") }}</dd>
+              </div>
+              <div v-if="metadataString(selectedDocument.metadata, 'url')">
+                <dt>URL</dt>
+                <dd>
+                  <a
+                    :href="metadataString(selectedDocument.metadata, 'url')"
+                    class="external-url"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    :title="metadataString(selectedDocument.metadata, 'url')"
+                  >
+                    {{ formatUrlLabel(metadataString(selectedDocument.metadata, "url")) }}
+                  </a>
+                </dd>
               </div>
               <div>
                 <dt>Created at</dt>
                 <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
               </div>
             </dl>
-            <pre class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
+            <template v-if="selectedDocument.source_type === 'jd' && hasJdSections(selectedDocument.metadata)">
+              <div v-if="metadataString(selectedDocument.metadata, 'job_description')">
+                <p class="eyebrow">Position description</p>
+                <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_description") }}</pre>
+              </div>
+              <div v-if="metadataString(selectedDocument.metadata, 'job_requirements')">
+                <p class="eyebrow">Position requirements</p>
+                <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_requirements") }}</pre>
+              </div>
+            </template>
+            <pre v-else class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
           </article>
         </section>
       </div>
@@ -219,6 +288,8 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 
 import AppShell from "../components/AppShell.vue";
+import CurrentJdPicker from "../components/CurrentJdPicker.vue";
+import { useCurrentJdSelection } from "../composables/useCurrentJdSelection";
 import { api, fileToBase64 } from "../lib/api";
 import { useWorkbenchStore } from "../stores/workbench";
 
@@ -247,6 +318,7 @@ const sourceNavItems = [
 
 const store = useWorkbenchStore();
 const queryClient = useQueryClient();
+const { currentJd, currentJdLabel } = useCurrentJdSelection();
 const showOnlyActive = ref(true);
 const resumePdfVersion = ref(Date.now());
 const pendingJdBase64 = ref<string>("");
@@ -390,15 +462,18 @@ const jdMutation = useMutation({
   mutationFn: () =>
     api.ingestJD({
       filename: pendingJdFilename.value || "jd.txt",
-      text: store.jdDraft || undefined,
       content_base64: pendingJdBase64.value || undefined,
       company: store.jdCompanyDraft || undefined,
       role: store.jdRoleDraft || undefined,
+      url: store.jdUrlDraft || undefined,
+      job_description: store.jdDescriptionDraft || undefined,
+      job_requirements: store.jdRequirementsDraft || undefined,
     }),
   onSuccess: async () => {
     pendingJdBase64.value = "";
     pendingJdFilename.value = "";
     await queryClient.invalidateQueries({ queryKey: ["documents"] });
+    await queryClient.invalidateQueries({ queryKey: ["jds"] });
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });
@@ -423,12 +498,25 @@ const questionMutation = useMutation({
 });
 const questionPending = computed(() => questionMutation.isPending.value);
 
+const resumeTailorMutation = useMutation({
+  mutationFn: () => api.getResumeTailorDraft(store.selectedJdId || undefined),
+});
+const resumeTailorPending = computed(() => resumeTailorMutation.isPending.value);
+const resumeTailorDraft = computed(() => resumeTailorMutation.data.value || null);
+
 watch(
   () => store.currentSourceTab,
   (value) => {
     if (value === "resume") {
       store.selectedDocumentId = "";
     }
+  }
+);
+
+watch(
+  () => store.selectedJdId,
+  () => {
+    resumeTailorMutation.reset();
   }
 );
 
@@ -443,7 +531,7 @@ onBeforeUnmount(() => {
 });
 
 function selectDocument(documentId: string) {
-  store.selectedDocumentId = documentId;
+  store.selectedDocumentId = store.selectedDocumentId === documentId ? "" : documentId;
 }
 
 async function onJdFile(event: Event) {
@@ -476,12 +564,60 @@ function submitQuestions() {
   questionMutation.mutate();
 }
 
+function generateResumeTailorDraft() {
+  resumeTailorMutation.mutate();
+}
+
 function toggleResumeCompileLog() {
   store.setResumeCompileLogExpanded(!store.resumeCompileLogExpanded);
 }
 
 function formatTimestamp(value: string | null | undefined): string {
   return value ? new Date(value).toLocaleString() : "Not yet";
+}
+
+function metadataString(metadata: Record<string, unknown>, key: string): string {
+  const value = metadata[key];
+  return typeof value === "string" ? value : "";
+}
+
+function hasJdSections(metadata: Record<string, unknown>): boolean {
+  return Boolean(
+    metadataString(metadata, "job_description") || metadataString(metadata, "job_requirements")
+  );
+}
+
+function formatUrlLabel(value: string): string {
+  if (!value) {
+    return "";
+  }
+  try {
+    const parsed = new URL(value);
+    const path = parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/$/, "");
+    const compact = `${parsed.hostname}${path}`;
+    return compact.length > 56 ? `${compact.slice(0, 53)}...` : compact;
+  } catch {
+    return value.length > 56 ? `${value.slice(0, 53)}...` : value;
+  }
+}
+
+function documentTitle(document: {
+  document_id: string;
+  filename: string | null;
+  metadata: Record<string, unknown>;
+  source_type: string;
+}): string {
+  if (document.source_type === "jd") {
+    const role = metadataString(document.metadata, "role");
+    const company = metadataString(document.metadata, "company");
+    if (company && role) {
+      return `${company} · ${role}`;
+    }
+    if (role || company) {
+      return role || company;
+    }
+  }
+  return document.filename || document.document_id;
 }
 
 function syncViewportMode() {
@@ -620,6 +756,24 @@ function stopResumePaneResize() {
   min-width: 0;
 }
 
+.sources-stack-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+
+.external-url {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-word;
+}
+
+:deep(.document-card.is-selected) {
+  border-color: rgba(189, 94, 44, 0.32);
+  background: rgba(189, 94, 44, 0.08);
+}
+
 .resume-workspace {
   display: flex;
   align-items: stretch;
@@ -702,6 +856,16 @@ function stopResumePaneResize() {
 .resume-log-card__body {
   max-height: 240px;
   overflow: auto;
+}
+
+.resume-tailor-card {
+  display: grid;
+  gap: 14px;
+}
+
+.tailor-list {
+  margin: 0;
+  padding-left: 18px;
 }
 
 @media (max-width: 1180px) {

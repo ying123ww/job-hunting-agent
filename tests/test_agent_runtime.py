@@ -46,6 +46,7 @@ def test_agent_runtime_writes_markdown_memory(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
     monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("INTERVIEW_AGENT_MEMORY_DIR", str(tmp_path / "memory"))
+    monkeypatch.setenv("INTERVIEW_AGENT_DIDA365_ENABLED", "false")
     get_settings.cache_clear()
 
     container = AppContainer.build(get_settings())
@@ -76,6 +77,9 @@ def test_agent_runtime_writes_markdown_memory(monkeypatch, tmp_path) -> None:
             text=jd.raw_text,
             company="ByteDance",
             role="Backend Intern",
+            url=None,
+            job_description=None,
+            job_requirements=None,
         )
         _question_result = container.question_ingestion.ingest_questions(
             session,
@@ -309,6 +313,7 @@ def test_reasoner_qa_planner_uses_goal_and_source_hints(monkeypatch, tmp_path) -
     monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
     monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("INTERVIEW_AGENT_MEMORY_DIR", str(tmp_path / "memory"))
+    monkeypatch.setenv("INTERVIEW_AGENT_DIDA365_ENABLED", "false")
     get_settings.cache_clear()
 
     container = AppContainer.build(get_settings())
@@ -341,11 +346,11 @@ def test_reasoner_qa_planner_uses_goal_and_source_hints(monkeypatch, tmp_path) -
 
 def test_proactive_tick_supports_drift_phase_plugins_and_updates_memory(tmp_path) -> None:
     class EmptyDiagnosis:
-        def current(self, session, *, user_id: str, limit: int):
+        def current(self, session, *, user_id: str, jd_id: str | None, limit: int):
             return "low", []
 
     class EmptyPlanning:
-        def today(self, session, *, user_id: str, day):
+        def today(self, session, *, user_id: str, jd_id: str | None, day):
             return None
 
         def generate(self, session, *, user_id: str, jd_id, gap_limit: int, day):
@@ -403,6 +408,7 @@ def test_semantic_memory_persists_turn_and_proactive_summaries(monkeypatch, tmp_
     monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
     monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("INTERVIEW_AGENT_MEMORY_DIR", str(tmp_path / "memory"))
+    monkeypatch.setenv("INTERVIEW_AGENT_DIDA365_ENABLED", "false")
     get_settings.cache_clear()
 
     container = AppContainer.build(get_settings())
@@ -433,6 +439,9 @@ def test_semantic_memory_persists_turn_and_proactive_summaries(monkeypatch, tmp_
             text=jd.raw_text,
             company="ByteDance",
             role="Backend Intern",
+            url=None,
+            job_description=None,
+            job_requirements=None,
         )
         _question_result = container.question_ingestion.ingest_questions(
             session,
@@ -472,11 +481,11 @@ def test_semantic_memory_persists_turn_and_proactive_summaries(monkeypatch, tmp_
 
 def test_proactive_tick_respects_do_not_disturb_policy(tmp_path) -> None:
     class EmptyDiagnosis:
-        def current(self, session, *, user_id: str, limit: int):
+        def current(self, session, *, user_id: str, jd_id: str | None, limit: int):
             return "medium", []
 
     class PlanningWithTask:
-        def today(self, session, *, user_id: str, day):
+        def today(self, session, *, user_id: str, jd_id: str | None, day):
             return SimpleNamespace(
                 plan_id="plan_1",
                 tasks=[
@@ -523,11 +532,11 @@ def test_proactive_tick_respects_do_not_disturb_policy(tmp_path) -> None:
 
 def test_proactive_tick_urgent_signal_bypasses_cooldown(tmp_path) -> None:
     class HighRiskDiagnosis:
-        def current(self, session, *, user_id: str, limit: int):
+        def current(self, session, *, user_id: str, jd_id: str | None, limit: int):
             return "high", [SimpleNamespace(dimension="system_design", severity="high")]
 
     class EmptyPlanning:
-        def today(self, session, *, user_id: str, day):
+        def today(self, session, *, user_id: str, jd_id: str | None, day):
             return None
 
         def generate(self, session, *, user_id: str, jd_id, gap_limit: int, day):
@@ -572,11 +581,11 @@ def test_proactive_tick_urgent_signal_bypasses_cooldown(tmp_path) -> None:
 
 def test_proactive_tick_cooldown_blocks_non_urgent_reminders(tmp_path) -> None:
     class MediumDiagnosis:
-        def current(self, session, *, user_id: str, limit: int):
+        def current(self, session, *, user_id: str, jd_id: str | None, limit: int):
             return "medium", []
 
     class PlanningWithTask:
-        def today(self, session, *, user_id: str, day):
+        def today(self, session, *, user_id: str, jd_id: str | None, day):
             return SimpleNamespace(
                 plan_id="plan_1",
                 tasks=[
@@ -632,6 +641,7 @@ def test_context_builder_includes_structured_profile_and_working_memory(monkeypa
     monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
     monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
     monkeypatch.setenv("INTERVIEW_AGENT_MEMORY_DIR", str(tmp_path / "memory"))
+    monkeypatch.setenv("INTERVIEW_AGENT_DIDA365_ENABLED", "false")
     get_settings.cache_clear()
 
     container = AppContainer.build(get_settings())
@@ -662,6 +672,9 @@ def test_context_builder_includes_structured_profile_and_working_memory(monkeypa
             text=jd_doc.raw_text,
             company="ByteDance",
             role="Backend Intern",
+            url=None,
+            job_description=None,
+            job_requirements=None,
         )
         _question_result = container.question_ingestion.ingest_questions(
             session,

@@ -55,6 +55,72 @@ def normalize_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip().lower()
 
 
+def compose_jd_source_text(
+    *,
+    job_description: str | None = None,
+    job_requirements: str | None = None,
+) -> str:
+    sections: list[str] = []
+    description = (job_description or "").strip()
+    requirements = (job_requirements or "").strip()
+    if description:
+        sections.append(f"职位描述\n{description}")
+    if requirements:
+        sections.append(f"职位要求\n{requirements}")
+    return "\n\n".join(sections).strip()
+
+
+def split_jd_sections(text: str) -> tuple[str | None, str | None]:
+    description_lines: list[str] = []
+    requirement_lines: list[str] = []
+    current_section: str | None = None
+
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped:
+            if current_section == "description" and description_lines and description_lines[-1] != "":
+                description_lines.append("")
+            elif current_section == "requirements" and requirement_lines and requirement_lines[-1] != "":
+                requirement_lines.append("")
+            continue
+
+        section, remainder = _match_jd_section_heading(stripped)
+        if section is not None:
+            current_section = section
+            if remainder:
+                if section == "description":
+                    description_lines.append(remainder)
+                else:
+                    requirement_lines.append(remainder)
+            continue
+
+        if current_section == "description":
+            description_lines.append(stripped)
+        elif current_section == "requirements":
+            requirement_lines.append(stripped)
+
+    description = "\n".join(description_lines).strip() or None
+    requirements = "\n".join(requirement_lines).strip() or None
+    return description, requirements
+
+
+def _match_jd_section_heading(line: str) -> tuple[str | None, str]:
+    aliases = {
+        "description": ("职位描述", "工作描述", "岗位描述", "job description"),
+        "requirements": ("职位要求", "任职要求", "岗位要求", "requirements", "job requirements"),
+    }
+    lowered = line.lower()
+    for section, names in aliases.items():
+        for name in names:
+            if lowered == name.lower():
+                return section, ""
+            for delimiter in ("：", ":"):
+                prefix = f"{name}{delimiter}"
+                if lowered.startswith(prefix.lower()):
+                    return section, line[len(prefix):].strip()
+    return None, ""
+
+
 def parse_source_header(raw_text: str) -> tuple[str | None, str | None]:
     header_match = re.search(r"【来源】\s*(.+)", raw_text)
     if not header_match:
@@ -196,7 +262,9 @@ def evaluate_answer(
 
 
 def extract_jd_requirements(text: str) -> list[dict[str, object]]:
-    lines = [line.strip("-• \t") for line in text.splitlines() if line.strip()]
+    _, job_requirements = split_jd_sections(text)
+    source_text = job_requirements or text
+    lines = [line.strip("-• \t") for line in source_text.splitlines() if line.strip()]
     requirements: list[dict[str, object]] = []
     for line in lines[:20]:
         topics = infer_topics(line)
@@ -212,7 +280,7 @@ def extract_jd_requirements(text: str) -> list[dict[str, object]]:
         )
     return requirements or [
         {
-            "text": text[:200],
+            "text": source_text[:200],
             "dimension": "backend_basic",
             "topics": ["General"],
             "weight": 0.5,

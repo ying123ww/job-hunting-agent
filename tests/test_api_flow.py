@@ -5,6 +5,7 @@ from interview_agent.core.container import AppContainer
 def test_end_to_end_service_flow(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("INTERVIEW_AGENT_DATABASE_URL", f"sqlite:///{tmp_path / 'app.db'}")
     monkeypatch.setenv("INTERVIEW_AGENT_CHROMA_DIR", str(tmp_path / "chroma"))
+    monkeypatch.setenv("INTERVIEW_AGENT_DIDA365_ENABLED", "false")
     get_settings.cache_clear()
 
     container = AppContainer.build(get_settings())
@@ -43,6 +44,9 @@ def test_end_to_end_service_flow(monkeypatch, tmp_path) -> None:
             text=jd.raw_text,
             company="ByteDance",
             role="Backend Intern",
+            url=None,
+            job_description=None,
+            job_requirements=None,
         )
 
         question_result = container.question_ingestion.ingest_questions(

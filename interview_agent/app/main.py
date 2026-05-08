@@ -14,12 +14,15 @@ from interview_agent.app.config import get_settings
 from interview_agent.app.schemas import (
     AgentTurnRequest,
     AgentTurnResponse,
+    CurrentJDUpdateRequest,
+    CurrentJDUpdateResponse,
     DocumentDetailResponse,
     DocumentSummaryResponse,
     GapAnalysisRequest,
     GapAnalysisResponse,
     HealthResponse,
     IngestResponse,
+    JDRecordResponse,
     JDIngestRequest,
     PlanGenerateRequest,
     PlanResponse,
@@ -31,12 +34,15 @@ from interview_agent.app.schemas import (
     ResumeIngestRequest,
     ResumeSourceResponse,
     ResumeSourceUpdateRequest,
+    ResumeTailorDraftRequest,
+    ResumeTailorDraftResponse,
     SyncTickTickRequest,
     SyncTickTickResponse,
     TaskResponse,
     WorkspaceOverviewResponse,
 )
 from interview_agent.core.container import AppContainer
+from interview_agent.ingestion.parser import compose_jd_source_text, split_jd_sections
 
 
 logging.basicConfig(level=logging.INFO)
@@ -77,6 +83,111 @@ def _user_id(container: AppContainer, requested: str | None) -> str:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _resolve_jd_sections(request: JDIngestRequest) -> tuple[str | None, str | None]:
+    if request.job_description or request.job_requirements:
+        return request.job_description, request.job_requirements
+    if request.text:
+        return split_jd_sections(request.text)
+    return None, None
+
+
+def _resolve_target_jd(session, container: AppContainer, *, user_id: str, requested_jd_id: str | None):
+    if requested_jd_id:
+        jd = container.repository.get_target_jd(session, jd_id=requested_jd_id)
+        if jd is None or jd.user_id != user_id:
+            raise HTTPException(status_code=404, detail=f"JD {requested_jd_id!r} was not found.")
+        return jd
+    return container.repository.resolve_target_jd(session, user_id=user_id, requested_jd_id=None)
+
+
+def _resolve_jd_id(session, container: AppContainer, *, user_id: str, requested_jd_id: str | None) -> str | None:
+    jd = _resolve_target_jd(session, container, user_id=user_id, requested_jd_id=requested_jd_id)
+    return jd.id if jd is not None else None
+
+
+def _jd_record_response(jd, *, current_jd_id: str | None) -> JDRecordResponse:
+    return JDRecordResponse(
+        jd_id=jd.id,
+        document_id=jd.document_id,
+        company=jd.company,
+        role=jd.role,
+        url=jd.url,
+        job_description=jd.job_description,
+        job_requirements=jd.job_requirements,
+        created_at=jd.created_at,
+        is_current=jd.id == current_jd_id,
+    )
+
+
+def _tailor_keywords(jd) -> list[str]:
+    keywords: list[str] = []
+    for requirement in jd.structured_requirements[:6]:
+        for topic in requirement.get("topics", []):
+            normalized = str(topic).strip()
+            if normalized and normalized != "General" and normalized not in keywords:
+                keywords.append(normalized)
+        dimension = str(requirement.get("dimension") or "").strip()
+        if dimension and dimension not in keywords:
+            keywords.append(dimension)
+    return keywords[:6]
+
+
+def _resume_tailor_draft(container: AppContainer, session, *, user_id: str, jd) -> ResumeTailorDraftResponse:
+    if jd is None:
+        raise HTTPException(status_code=400, detail="Create or select a JD before generating a resume tailor draft.")
+
+    requirements = jd.structured_requirements[:5]
+    keywords = _tailor_keywords(jd)
+    query_text = "简历 项目经历 bullet " + " ".join(
+        str(item.get("text") or "").strip() for item in requirements if str(item.get("text") or "").strip()
+    )
+    evidence = container.retrieval.build_evidence_bundle(
+        session,
+        user_id=user_id,
+        query_text=query_text.strip() or "简历 项目经历 bullet",
+        jd_id=jd.id,
+        limit=6,
+    )
+    resume_text = container.resume_workspace.get_source_snapshot().source.lower()
+    resume_hits = [item for item in evidence if item.source_type == "resume"]
+    matched_requirements = 0
+    suggestions: list[str] = []
+    for requirement in requirements:
+        requirement_text = str(requirement.get("text") or "").strip()
+        if not requirement_text:
+            continue
+        topics = [
+            str(topic).strip()
+            for topic in requirement.get("topics", [])
+            if str(topic).strip() and str(topic).strip() != "General"
+        ]
+        anchors = topics[:2] or [requirement_text[:24]]
+        matched = any(topic.lower() in resume_text for topic in topics) if topics else requirement_text.lower() in resume_text
+        if matched:
+            matched_requirements += 1
+            suggestions.append(
+                f"把与 `{anchors[0]}` 相关的项目 bullet 前移，并补规模、结果或 trade-off，直接对齐 `{requirement_text}`。"
+            )
+        else:
+            suggestions.append(
+                f"新增或改写一条项目 bullet，显式体现 `{anchors[0]}`，避免只写通用职责，目标对齐 `{requirement_text}`。"
+            )
+    if keywords:
+        suggestions.append(f"在 Summary 或 Skills 里显式补上关键词：{', '.join(keywords[:4])}。")
+    summary = (
+        f"当前 JD 重点覆盖 {', '.join(keywords[:4]) or '核心后端能力'}；"
+        f" 当前简历在 {matched_requirements}/{max(len(requirements), 1)} 条核心要求上已有明显对应。"
+    )
+    if resume_hits:
+        summary += " 已从已保存简历内容里检索到相关证据，可优先强化这些命中经历。"
+    return ResumeTailorDraftResponse(
+        jd_id=jd.id,
+        summary=summary,
+        highlighted_keywords=keywords,
+        suggestions=suggestions[:6],
+    )
 
 
 def _task_response(task) -> TaskResponse:
@@ -180,12 +291,15 @@ async def root() -> dict[str, object]:
             "resume_compile_log": "/resume/compile-log",
             "ingest_resume": "/ingest/resume",
             "ingest_jd": "/ingest/jd",
+            "jds": "/jds",
+            "jds_current": "/jds/current",
             "ingest_questions": "/ingest/questions",
             "diagnosis_gap": "/diagnosis/gap",
             "diagnosis_current": "/diagnosis/current",
             "plan_generate": "/plan/generate",
             "plan_today": "/plan/today",
             "plan_sync_ticktick": "/plan/sync_ticktick",
+            "resume_tailor_draft": "/resume/tailor-draft",
             "agent_turn": "/agent/turn",
             "agent_proactive_tick": "/agent/proactive/tick",
             "workspace_overview": "/workspace/overview",
@@ -276,24 +390,56 @@ async def ingest_resume(http_request: Request, request: ResumeIngestRequest) -> 
 async def ingest_jd(http_request: Request, request: JDIngestRequest) -> IngestResponse:
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
-    metadata = {**request.metadata, "company": request.company, "role": request.role}
+    job_description, job_requirements = _resolve_jd_sections(request)
+    resolved_text = request.text or compose_jd_source_text(
+        job_description=job_description,
+        job_requirements=job_requirements,
+    )
+    metadata = {
+        **request.metadata,
+        "company": request.company,
+        "role": request.role,
+        "url": request.url,
+        "job_description": job_description,
+        "job_requirements": job_requirements,
+    }
     with container.db.session_scope() as session:
         result = container.document_ingestion.ingest_document(
             session,
             user_id=user_id,
             source_type="jd",
-            text=request.text,
+            text=resolved_text,
             content_base64=request.content_base64,
             filename=request.filename,
             metadata=metadata,
         )
-        container.document_ingestion.persist_jd_side_effects(
+        if not job_description and not job_requirements:
+            job_description, job_requirements = split_jd_sections(result.raw_text)
+            metadata = {
+                **metadata,
+                "job_description": job_description,
+                "job_requirements": job_requirements,
+            }
+            container.repository.update_document_metadata(
+                session,
+                document_id=result.document_id,
+                metadata_json=metadata,
+            )
+        jd = container.document_ingestion.persist_jd_side_effects(
             session,
             user_id=user_id,
             document_id=result.document_id,
             text=result.raw_text,
             company=request.company,
             role=request.role,
+            url=request.url,
+            job_description=job_description,
+            job_requirements=job_requirements,
+        )
+        container.repository.upsert_user_profile(
+            session,
+            user_id=user_id,
+            current_jd_id=jd.id,
         )
         return IngestResponse(
             document_id=result.document_id,
@@ -301,6 +447,32 @@ async def ingest_jd(http_request: Request, request: JDIngestRequest) -> IngestRe
             content_hash=result.content_hash,
             message="JD ingested successfully.",
         )
+
+
+@router.get("/jds", response_model=list[JDRecordResponse])
+async def list_jds(http_request: Request, user_id: str | None = None) -> list[JDRecordResponse]:
+    container = _container(http_request)
+    resolved_user_id = _user_id(container, user_id)
+    with container.db.session_scope() as session:
+        current = container.repository.resolve_target_jd(session, user_id=resolved_user_id, requested_jd_id=None)
+        records = container.repository.list_target_jds(session, user_id=resolved_user_id)
+        return [_jd_record_response(item, current_jd_id=current.id if current is not None else None) for item in records]
+
+
+@router.put("/jds/current", response_model=CurrentJDUpdateResponse)
+async def set_current_jd(http_request: Request, request: CurrentJDUpdateRequest) -> CurrentJDUpdateResponse:
+    container = _container(http_request)
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        jd = _resolve_target_jd(session, container, user_id=user_id, requested_jd_id=request.jd_id)
+        if jd is None:
+            raise HTTPException(status_code=404, detail=f"JD {request.jd_id!r} was not found.")
+        container.repository.upsert_user_profile(
+            session,
+            user_id=user_id,
+            current_jd_id=jd.id,
+        )
+        return CurrentJDUpdateResponse(current_jd_id=jd.id)
 
 
 @router.post("/ingest/questions", response_model=QuestionIngestResponse)
@@ -340,14 +512,16 @@ async def analyze_gap(http_request: Request, request: GapAnalysisRequest) -> Gap
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
+        resolved_jd_id = _resolve_jd_id(session, container, user_id=user_id, requested_jd_id=request.jd_id)
         overall_risk, gaps = container.diagnosis.analyze(
             session,
             user_id=user_id,
-            jd_id=request.jd_id,
+            jd_id=resolved_jd_id,
             limit=request.limit,
             persist=True,
         )
         return GapAnalysisResponse(
+            jd_id=resolved_jd_id,
             overall_risk=overall_risk,
             generated_at=_utcnow(),
             top_gaps=[_gap_response(gap) for gap in gaps],
@@ -355,16 +529,24 @@ async def analyze_gap(http_request: Request, request: GapAnalysisRequest) -> Gap
 
 
 @router.get("/diagnosis/current", response_model=GapAnalysisResponse)
-async def current_gap(http_request: Request, user_id: str | None = None, limit: int = 3) -> GapAnalysisResponse:
+async def current_gap(
+    http_request: Request,
+    user_id: str | None = None,
+    jd_id: str | None = None,
+    limit: int = 3,
+) -> GapAnalysisResponse:
     container = _container(http_request)
     resolved_user_id = _user_id(container, user_id)
     with container.db.session_scope() as session:
+        resolved_jd_id = _resolve_jd_id(session, container, user_id=resolved_user_id, requested_jd_id=jd_id)
         overall_risk, gaps = container.diagnosis.current(
             session,
             user_id=resolved_user_id,
+            jd_id=resolved_jd_id,
             limit=limit,
         )
         return GapAnalysisResponse(
+            jd_id=resolved_jd_id,
             overall_risk=overall_risk,
             generated_at=_utcnow(),
             top_gaps=[_gap_response(gap) for gap in gaps],
@@ -376,10 +558,11 @@ async def generate_plan(http_request: Request, request: PlanGenerateRequest) -> 
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
+        resolved_jd_id = _resolve_jd_id(session, container, user_id=user_id, requested_jd_id=request.jd_id)
         plan = container.planning.generate(
             session,
             user_id=user_id,
-            jd_id=request.jd_id,
+            jd_id=resolved_jd_id,
             gap_limit=request.gap_limit,
             day=request.target_date,
         )
@@ -392,13 +575,14 @@ async def generate_plan(http_request: Request, request: PlanGenerateRequest) -> 
 
 
 @router.get("/plan/today", response_model=PlanResponse)
-async def today_plan(http_request: Request, user_id: str | None = None) -> PlanResponse:
+async def today_plan(http_request: Request, user_id: str | None = None, jd_id: str | None = None) -> PlanResponse:
     container = _container(http_request)
     resolved_user_id = _user_id(container, user_id)
     with container.db.session_scope() as session:
-        plan = container.planning.today(session, user_id=resolved_user_id, day=None)
+        resolved_jd_id = _resolve_jd_id(session, container, user_id=resolved_user_id, requested_jd_id=jd_id)
+        plan = container.planning.today(session, user_id=resolved_user_id, jd_id=resolved_jd_id, day=None)
         if plan is None:
-            return PlanResponse(plan_id="", jd_id=None, summary="No plan for today.", tasks=[])
+            return PlanResponse(plan_id="", jd_id=resolved_jd_id, summary="No plan for today.", tasks=[])
         return PlanResponse(
             plan_id=plan.plan_id,
             jd_id=plan.jd_id,
@@ -425,21 +609,35 @@ async def sync_ticktick(http_request: Request, request: SyncTickTickRequest) -> 
 
 
 @router.get("/workspace/overview", response_model=WorkspaceOverviewResponse)
-async def workspace_overview(http_request: Request, user_id: str | None = None) -> WorkspaceOverviewResponse:
+async def workspace_overview(
+    http_request: Request,
+    user_id: str | None = None,
+    jd_id: str | None = None,
+) -> WorkspaceOverviewResponse:
     container = _container(http_request)
     resolved_user_id = _user_id(container, user_id)
     with container.db.session_scope() as session:
+        resolved_jd_id = _resolve_jd_id(session, container, user_id=resolved_user_id, requested_jd_id=jd_id)
         counts = container.repository.count_active_documents_by_source(
             session,
             user_id=resolved_user_id,
         )
-        profile = container.repository.get_user_profile(session, user_id=resolved_user_id)
-        gaps = container.repository.latest_gap_run(session, user_id=resolved_user_id, limit=3)
-        today_plan_result = container.planning.today(session, user_id=resolved_user_id, day=None)
+        overall_risk, gaps = container.diagnosis.current(
+            session,
+            user_id=resolved_user_id,
+            jd_id=resolved_jd_id,
+            limit=3,
+        )
+        today_plan_result = container.planning.today(
+            session,
+            user_id=resolved_user_id,
+            jd_id=resolved_jd_id,
+            day=None,
+        )
         if today_plan_result is None:
             today_plan = PlanResponse(
                 plan_id="",
-                jd_id=None,
+                jd_id=resolved_jd_id,
                 summary="No plan for today.",
                 tasks=[],
             )
@@ -452,7 +650,7 @@ async def workspace_overview(http_request: Request, user_id: str | None = None) 
             )
         return WorkspaceOverviewResponse(
             active_document_counts=counts,
-            latest_overall_risk=profile.latest_overall_risk if profile is not None else None,
+            latest_overall_risk=overall_risk if gaps else None,
             top_gaps=[_gap_response(gap) for gap in gaps],
             today_plan=today_plan,
             ticktick_sync_mode=_sync_mode(container),
@@ -500,12 +698,13 @@ async def agent_turn(http_request: Request, request: AgentTurnRequest) -> AgentT
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
+        resolved_jd_id = _resolve_jd_id(session, container, user_id=user_id, requested_jd_id=request.jd_id)
         result = await container.agent_runtime.run_turn(
             session,
             RuntimeAgentTurnRequest(
                 user_id=user_id,
                 message=request.message,
-                jd_id=request.jd_id,
+                jd_id=resolved_jd_id,
             ),
         )
         return AgentTurnResponse(
@@ -535,11 +734,11 @@ async def proactive_tick(http_request: Request, request: ProactiveTickRequest) -
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
-        now_state = container.agent_memory.read_now_state()
+        resolved_jd_id = _resolve_jd_id(session, container, user_id=user_id, requested_jd_id=request.jd_id)
         result = container.proactive_service.tick(
             session,
             user_id=user_id,
-            current_jd_id=request.jd_id or now_state.get("current_jd_id") or None,
+            current_jd_id=resolved_jd_id,
             force=request.force,
         )
         return ProactiveTickResponse(
@@ -549,6 +748,18 @@ async def proactive_tick(http_request: Request, request: ProactiveTickRequest) -
             generated_plan_id=result.generated_plan_id,
             drift_entered=result.drift_entered,
         )
+
+
+@router.post("/resume/tailor-draft", response_model=ResumeTailorDraftResponse)
+async def resume_tailor_draft(
+    http_request: Request,
+    request: ResumeTailorDraftRequest,
+) -> ResumeTailorDraftResponse:
+    container = _container(http_request)
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        jd = _resolve_target_jd(session, container, user_id=user_id, requested_jd_id=request.jd_id)
+        return _resume_tailor_draft(container, session, user_id=user_id, jd=jd)
 
 
 app = create_app()

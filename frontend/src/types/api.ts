@@ -35,6 +35,18 @@ export interface PlanResponse {
   tasks: TaskResponse[];
 }
 
+export interface JDRecordResponse {
+  jd_id: string;
+  document_id: string | null;
+  company: string | null;
+  role: string | null;
+  url: string | null;
+  job_description: string | null;
+  job_requirements: string | null;
+  created_at: string;
+  is_current: boolean;
+}
+
 export interface HealthResponse {
   status: string;
   app_name: string;
@@ -91,6 +103,7 @@ export interface QuestionIngestResponse extends IngestResponse {
 }
 
 export interface GapAnalysisResponse {
+  jd_id: string | null;
   overall_risk: string;
   generated_at: string;
   top_gaps: GapResponse[];
@@ -135,6 +148,13 @@ export interface WorkspaceOverviewResponse {
   ticktick_sync_mode: "dry_run" | "live";
 }
 
+export interface ResumeTailorDraftResponse {
+  jd_id: string | null;
+  summary: string;
+  highlighted_keywords: string[];
+  suggestions: string[];
+}
+
 export interface ResumeIngestPayload {
   user_id?: string;
   text?: string;
@@ -151,6 +171,9 @@ export interface ResumeSourceUpdatePayload {
 export interface JDIngestPayload extends ResumeIngestPayload {
   company?: string;
   role?: string;
+  url?: string;
+  job_description?: string;
+  job_requirements?: string;
 }
 
 export interface QuestionIngestPayload extends ResumeIngestPayload {

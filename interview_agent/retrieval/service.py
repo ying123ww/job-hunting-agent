@@ -65,6 +65,7 @@ class RetrievalService:
         dimension: str | None = None,
         intent: str | None = None,
         memory_snapshot: MemorySnapshot | None = None,
+        jd_id: str | None = None,
         limit: int = 4,
     ) -> list[EvidenceItem]:
         route = self.route_request(
@@ -79,6 +80,7 @@ class RetrievalService:
             collections.append("question_bank")
         if "gap_record" in route.source_types:
             collections.append("gap_memory")
+        jd_document_id = self._resolve_jd_document_id(session=session, user_id=user_id, jd_id=jd_id)
 
         merged: dict[str, _MergedCandidate] = {}
         for collection in collections:
@@ -95,6 +97,12 @@ class RetrievalService:
                     if route.source_types and source_type not in route.source_types:
                         continue
                     metadata = dict(match.metadata)
+                    if (
+                        source_type == "jd"
+                        and jd_document_id is not None
+                        and str(metadata.get("document_id") or "") != jd_document_id
+                    ):
+                        continue
                     dedupe_key = self._dedupe_key(
                         chunk_id=metadata.get("chunk_id", ""),
                         question_id=metadata.get("question_id", ""),
@@ -122,6 +130,8 @@ class RetrievalService:
                     limit=max(limit * 2, 8),
                 )
                 for index, match in enumerate(lexical_matches):
+                    if match.source_type == "jd" and jd_document_id is not None and match.document_id != jd_document_id:
+                        continue
                     normalized = 1.0 / (1.0 + max(match.rank, 0.0) + index * 0.05)
                     metadata = {
                         "source_type": match.source_type,
@@ -255,3 +265,11 @@ class RetrievalService:
             existing.metadata = incoming.metadata
         existing.prefers_question = prefers_question
         return existing
+
+    def _resolve_jd_document_id(self, *, session: Session | None, user_id: str, jd_id: str | None) -> str | None:
+        if jd_id is None or session is None or self.repository is None:
+            return None
+        jd = self.repository.latest_target_jd(session, user_id=user_id, jd_id=jd_id)
+        if jd is None:
+            return None
+        return jd.document_id or None

@@ -2,6 +2,7 @@
   <AppShell title="Diagnosis">
     <template #header-actions>
       <div class="cta-row">
+        <CurrentJdPicker />
         <el-input-number v-model="limit" :min="1" :max="10" />
         <el-button type="primary" :loading="analyzePending" @click="runDiagnosis">
           Run gap analysis
@@ -14,6 +15,7 @@
         <p class="eyebrow">Current state</p>
         <h3 class="section-title">Latest weakness map and supporting evidence</h3>
       </div>
+      <p class="muted-copy">Current JD: {{ currentJdLabel }}</p>
       <p class="muted-copy">
         Overall risk:
         <strong>{{ diagnosis?.overall_risk ?? "n/a" }}</strong>
@@ -50,19 +52,24 @@ import { computed, ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 
 import AppShell from "../components/AppShell.vue";
+import CurrentJdPicker from "../components/CurrentJdPicker.vue";
+import { useCurrentJdSelection } from "../composables/useCurrentJdSelection";
 import { api } from "../lib/api";
+import { useWorkbenchStore } from "../stores/workbench";
 
 const queryClient = useQueryClient();
 const limit = ref(3);
+const store = useWorkbenchStore();
+const { currentJdLabel } = useCurrentJdSelection();
 const { data: diagnosis } = useQuery({
-  queryKey: ["diagnosis", "current"],
-  queryFn: () => api.currentDiagnosis(),
+  queryKey: computed(() => ["diagnosis", "current", store.selectedJdId]),
+  queryFn: () => api.currentDiagnosis(store.selectedJdId || undefined),
 });
 
 const analyzeMutation = useMutation({
-  mutationFn: () => api.analyzeGaps(limit.value),
+  mutationFn: () => api.analyzeGaps(limit.value, store.selectedJdId || undefined),
   onSuccess: async (data) => {
-    queryClient.setQueryData(["diagnosis", "current"], data);
+    queryClient.setQueryData(["diagnosis", "current", store.selectedJdId], data);
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
   },
 });

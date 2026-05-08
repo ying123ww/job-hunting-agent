@@ -2,6 +2,7 @@
   <AppShell title="Chat">
     <template #header-actions>
       <div class="cta-row">
+        <CurrentJdPicker />
         <el-button @click="store.resetChat" plain>Clear local transcript</el-button>
       </div>
     </template>
@@ -12,6 +13,7 @@
           <p class="eyebrow">Conversation</p>
           <h3 class="section-title">Agent-backed prep chat</h3>
         </div>
+        <p class="muted-copy">Current JD: {{ currentJdLabel }}</p>
         <div class="message-list">
           <article
             v-for="message in store.chatTranscript"
@@ -70,14 +72,17 @@ import { computed, ref } from "vue";
 import { useMutation } from "@tanstack/vue-query";
 
 import AppShell from "../components/AppShell.vue";
+import CurrentJdPicker from "../components/CurrentJdPicker.vue";
+import { useCurrentJdSelection } from "../composables/useCurrentJdSelection";
 import { api } from "../lib/api";
 import { useWorkbenchStore } from "../stores/workbench";
 
 const store = useWorkbenchStore();
+const { currentJdLabel } = useCurrentJdSelection();
 const draft = ref("");
 
 const turnMutation = useMutation({
-  mutationFn: (message: string) => api.agentTurn(message),
+  mutationFn: (message: string) => api.agentTurn(message, store.selectedJdId || undefined),
   onSuccess: (response, message) => {
     store.appendUserMessage(message);
     store.appendAssistantMessage(response);

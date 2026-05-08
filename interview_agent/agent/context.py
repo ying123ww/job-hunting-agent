@@ -44,6 +44,9 @@ class AgentContextBuilder:
         jd_lines: list[str] = []
         if jd is not None:
             jd_lines.append("## Current JD")
+            jd_lines.append(f"- company: {jd.company or 'unknown'}")
+            jd_lines.append(f"- role: {jd.role or 'unknown'}")
+            jd_lines.append(f"- url: {jd.url or 'none'}")
             requirements = jd.structured_requirements[:5]
             for item in requirements:
                 jd_lines.append(f"- {item.get('text', '')}")

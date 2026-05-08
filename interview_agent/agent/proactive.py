@@ -154,8 +154,18 @@ class _CollectSignalsModule:
         self.planning = planning
 
     async def run(self, frame: BeforeTickFrame) -> BeforeTickFrame:
-        overall_risk, gaps = self.diagnosis.current(frame.input.session, user_id=frame.input.user_id, limit=3)
-        plan = self.planning.today(frame.input.session, user_id=frame.input.user_id, day=date.today())
+        overall_risk, gaps = self.diagnosis.current(
+            frame.input.session,
+            user_id=frame.input.user_id,
+            jd_id=frame.input.current_jd_id,
+            limit=3,
+        )
+        plan = self.planning.today(
+            frame.input.session,
+            user_id=frame.input.user_id,
+            jd_id=frame.input.current_jd_id,
+            day=date.today(),
+        )
         frame.slots["overall_risk"] = overall_risk
         frame.slots["latest_gaps"] = gaps
         frame.slots["plan"] = plan
