@@ -139,7 +139,7 @@
 
       <div
         v-else
-        :class="store.currentSourceTab === 'jd' ? 'sources-stack-layout' : 'split-layout'"
+        class="sources-stack-layout"
       >
         <section class="panel section-stack">
           <div>
@@ -237,45 +237,72 @@
           <article v-if="selectedDocument" class="detail-card">
             <p class="eyebrow">Preview</p>
             <h4>{{ documentTitle(selectedDocument) }}</h4>
-            <dl class="metadata-grid">
-              <div v-if="metadataString(selectedDocument.metadata, 'company')">
-                <dt>Company</dt>
-                <dd>{{ metadataString(selectedDocument.metadata, "company") }}</dd>
-              </div>
-              <div v-if="metadataString(selectedDocument.metadata, 'role')">
-                <dt>Role</dt>
-                <dd>{{ metadataString(selectedDocument.metadata, "role") }}</dd>
-              </div>
-              <div v-if="metadataString(selectedDocument.metadata, 'url')">
-                <dt>URL</dt>
-                <dd>
-                  <a
-                    :href="metadataString(selectedDocument.metadata, 'url')"
-                    class="external-url"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    :title="metadataString(selectedDocument.metadata, 'url')"
-                  >
-                    {{ formatUrlLabel(metadataString(selectedDocument.metadata, "url")) }}
-                  </a>
-                </dd>
-              </div>
-              <div>
-                <dt>Created at</dt>
-                <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
-              </div>
-            </dl>
-            <template v-if="selectedDocument.source_type === 'jd' && hasJdSections(selectedDocument.metadata)">
-              <div v-if="metadataString(selectedDocument.metadata, 'job_description')">
-                <p class="eyebrow">Position description</p>
-                <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_description") }}</pre>
-              </div>
-              <div v-if="metadataString(selectedDocument.metadata, 'job_requirements')">
-                <p class="eyebrow">Position requirements</p>
-                <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_requirements") }}</pre>
-              </div>
+            <template v-if="selectedDocument.source_type === 'jd'">
+              <dl class="metadata-grid">
+                <div v-if="metadataString(selectedDocument.metadata, 'company')">
+                  <dt>Company</dt>
+                  <dd>{{ metadataString(selectedDocument.metadata, "company") }}</dd>
+                </div>
+                <div v-if="metadataString(selectedDocument.metadata, 'role')">
+                  <dt>Role</dt>
+                  <dd>{{ metadataString(selectedDocument.metadata, "role") }}</dd>
+                </div>
+                <div v-if="metadataString(selectedDocument.metadata, 'url')">
+                  <dt>URL</dt>
+                  <dd>
+                    <a
+                      :href="metadataString(selectedDocument.metadata, 'url')"
+                      class="external-url"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      :title="metadataString(selectedDocument.metadata, 'url')"
+                    >
+                      {{ formatUrlLabel(metadataString(selectedDocument.metadata, "url")) }}
+                    </a>
+                  </dd>
+                </div>
+                <div>
+                  <dt>Created at</dt>
+                  <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
+                </div>
+              </dl>
+              <template v-if="hasJdSections(selectedDocument.metadata)">
+                <div v-if="metadataString(selectedDocument.metadata, 'job_description')">
+                  <p class="eyebrow">Position description</p>
+                  <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_description") }}</pre>
+                </div>
+                <div v-if="metadataString(selectedDocument.metadata, 'job_requirements')">
+                  <p class="eyebrow">Position requirements</p>
+                  <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_requirements") }}</pre>
+                </div>
+              </template>
+              <pre v-else class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
             </template>
-            <pre v-else class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
+
+            <template v-else-if="selectedDocument.source_type === 'question'">
+              <dl class="metadata-grid">
+                <div v-if="metadataString(selectedDocument.metadata, 'source_scope')">
+                  <dt>Question bank</dt>
+                  <dd>{{ metadataString(selectedDocument.metadata, "source_scope") }}</dd>
+                </div>
+                <div>
+                  <dt>Created at</dt>
+                  <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
+                </div>
+              </dl>
+              <p class="eyebrow">Question set preview</p>
+              <pre class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
+            </template>
+
+            <template v-else>
+              <dl class="metadata-grid">
+                <div>
+                  <dt>Created at</dt>
+                  <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
+                </div>
+              </dl>
+              <pre class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
+            </template>
           </article>
         </section>
       </div>
@@ -506,10 +533,8 @@ const resumeTailorDraft = computed(() => resumeTailorMutation.data.value || null
 
 watch(
   () => store.currentSourceTab,
-  (value) => {
-    if (value === "resume") {
-      store.selectedDocumentId = "";
-    }
+  () => {
+    store.selectedDocumentId = "";
   }
 );
 
@@ -517,6 +542,19 @@ watch(
   () => store.selectedJdId,
   () => {
     resumeTailorMutation.reset();
+  }
+);
+
+watch(
+  () => documentsData.value,
+  (documents) => {
+    if (!store.selectedDocumentId || !documents?.length) {
+      return;
+    }
+    const stillVisible = documents.some((item) => item.document_id === store.selectedDocumentId);
+    if (!stillVisible) {
+      store.selectedDocumentId = "";
+    }
   }
 );
 
