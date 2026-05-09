@@ -239,6 +239,36 @@ class GapAnalysisService:
                 "按需求澄清、容量估算、架构与 trade-off 四步重做一次系统设计。",
                 "把缓存、限流和扩展性方案整理成固定答题模板。",
             ]
+        if dimension == "llm_foundations":
+            return [
+                "把核心机制拆成结构、信息流、复杂度、trade-off 四段重写一版答案。",
+                "针对同主题补一张原理对比表，例如 Attention vs 线性/稀疏变体。",
+            ]
+        if dimension == "post_training_alignment":
+            return [
+                "补写该题涉及的训练目标、数据格式、可训练参数和关键超参。",
+                "准备一版能说清 SFT / LoRA / DPO 等差异与适用场景的口述答案。",
+            ]
+        if dimension == "llm_inference_serving":
+            return [
+                "围绕 prefill、decode、KV cache、batching、显存与吞吐 trade-off 重写答案。",
+                "准备一个线上推理优化案例，能解释时延瓶颈和具体优化动作。",
+            ]
+        if dimension == "rag_retrieval":
+            return [
+                "补写切分、索引、召回、重排、生成注入和评测指标六步链路。",
+                "准备一版能说清 recall、precision、faithfulness 与幻觉控制的回答模板。",
+            ]
+        if dimension == "agent_orchestration":
+            return [
+                "补写状态管理、工具调用、记忆、失败恢复和 human-in-the-loop 机制。",
+                "用一个真实 agent workflow 例子讲清节点、边、终止条件和监控方式。",
+            ]
+        if dimension == "llm_evaluation":
+            return [
+                "补写离线评测集、在线指标、judge 方案和回归监控机制。",
+                "准备一版能区分效果指标、事实性指标和产品指标的结构化回答。",
+            ]
         if dimension == "rag_llm":
             return [
                 "补写 RAG/Agent 项目的评测指标和效果表达。",

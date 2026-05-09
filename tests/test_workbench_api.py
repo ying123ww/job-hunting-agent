@@ -12,11 +12,13 @@ from interview_agent.app.main import (
     create_app,
     document_detail,
     documents,
+    evaluate_questions,
     health,
     ingest_jd,
     ingest_questions,
     ingest_resume,
     list_jds,
+    question_bank_detail,
     resume_tailor_draft,
     resume_compile_log,
     resume_pdf,
@@ -29,6 +31,7 @@ from interview_agent.app.main import (
 from interview_agent.app.schemas import (
     CurrentJDUpdateRequest,
     JDIngestRequest,
+    QuestionEvaluateRequest,
     QuestionIngestRequest,
     ResumeIngestRequest,
     ResumeSourceUpdateRequest,
@@ -238,6 +241,68 @@ def test_ingest_jd_promotes_url_and_sections_to_canonical_target(monkeypatch, tm
     assert jds[0].job_requirements == "熟悉 Redis\n熟悉 MySQL"
     assert profile is not None
     assert profile.current_jd_id == jds[0].id
+
+
+def test_question_ingest_can_skip_evaluation_then_run_it_later(monkeypatch, tmp_path) -> None:
+    request = _make_request(monkeypatch, tmp_path)
+
+    saved = _run(
+        ingest_questions(
+            request,
+            QuestionIngestRequest(
+                filename="questions.txt",
+                text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
+                evaluate_answers=False,
+            ),
+        )
+    )
+
+    assert saved.records[0].evaluation_status == "pending"
+    assert saved.records[0].accuracy_score is None
+
+    evaluated = _run(
+        evaluate_questions(
+            request,
+            QuestionEvaluateRequest(document_id=saved.document_id),
+        )
+    )
+
+    assert evaluated.document_id == saved.document_id
+    assert evaluated.evaluated_count == 1
+    assert evaluated.records[0].evaluation_status == "completed"
+
+
+def test_question_bank_detail_returns_saved_summary_and_records(monkeypatch, tmp_path) -> None:
+    request = _make_request(monkeypatch, tmp_path)
+
+    saved = _run(
+        ingest_questions(
+            request,
+            QuestionIngestRequest(
+                filename="questions.txt",
+                text="Redis 为什么单线程还这么快？\n我的答案：因为它是内存操作。",
+                source_company="ByteDance",
+                source_role="Backend Intern",
+                evaluate_answers=False,
+            ),
+        )
+    )
+    _run(
+        evaluate_questions(
+            request,
+            QuestionEvaluateRequest(document_id=saved.document_id),
+        )
+    )
+
+    detail = _run(question_bank_detail(request, saved.document_id))
+
+    assert detail.document_id == saved.document_id
+    assert detail.question_count == 1
+    assert detail.evaluation_status == "completed"
+    assert detail.metadata["source_company"] == "ByteDance"
+    assert detail.metadata["source_role"] == "Backend Intern"
+    assert detail.records[0].evaluation_status == "completed"
+    assert detail.summary
 
 
 def test_list_jds_and_set_current_jd(monkeypatch, tmp_path) -> None:

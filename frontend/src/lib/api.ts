@@ -8,6 +8,8 @@ import type {
   JDRecordResponse,
   JDIngestPayload,
   PlanResponse,
+  QuestionEvaluateResponse,
+  QuestionBankDetailResponse,
   QuestionIngestPayload,
   QuestionIngestResponse,
   ResumeCompileResponse,
@@ -32,8 +34,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed with status ${response.status}`);
+    throw new Error(await extractErrorDetail(response));
   }
 
   return (await response.json()) as T;
@@ -48,11 +49,26 @@ async function requestText(path: string, init?: RequestInit): Promise<string> {
   });
 
   if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(detail || `Request failed with status ${response.status}`);
+    throw new Error(await extractErrorDetail(response));
   }
 
   return response.text();
+}
+
+async function extractErrorDetail(response: Response): Promise<string> {
+  const raw = await response.text();
+  if (!raw) {
+    return `Request failed with status ${response.status}`;
+  }
+  try {
+    const parsed = JSON.parse(raw) as { detail?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail;
+    }
+  } catch {
+    // Fall through to raw text.
+  }
+  return raw;
 }
 
 export const api = {
@@ -109,6 +125,8 @@ export const api = {
   },
   getDocumentDetail: (documentId: string) =>
     request<DocumentDetailResponse>(`/documents/${documentId}`),
+  getQuestionBankDetail: (documentId: string) =>
+    request<QuestionBankDetailResponse>(`/questions/banks/${documentId}`),
   ingestResume: (payload: ResumeIngestPayload) =>
     request<IngestResponse>("/ingest/resume", {
       method: "POST",
@@ -123,6 +141,11 @@ export const api = {
     request<QuestionIngestResponse>("/ingest/questions", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  evaluateQuestions: (documentId: string) =>
+    request<QuestionEvaluateResponse>("/questions/evaluate", {
+      method: "POST",
+      body: JSON.stringify({ document_id: documentId }),
     }),
   currentDiagnosis: (jdId?: string) => {
     const query = new URLSearchParams();

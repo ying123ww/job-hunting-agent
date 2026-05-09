@@ -185,29 +185,173 @@
               />
               <input type="file" @change="onQuestionFile" />
               <div class="form-actions">
-                <el-button type="primary" :loading="questionPending" @click="submitQuestions">
+                <el-button type="primary" :loading="questionSubmitPending" @click="submitQuestions">
                   Save question set
                 </el-button>
               </div>
-              <article v-if="store.lastQuestionIngest" class="detail-card">
-                <p class="eyebrow">Latest ingest result</p>
-                <p class="muted-copy">
-                  processed={{ store.lastQuestionIngest.processed_count }},
-                  deduped={{ store.lastQuestionIngest.deduped_count }},
-                  skipped={{ store.lastQuestionIngest.skipped_count }},
-                  inactive={{ store.lastQuestionIngest.inactive_count }}
-                </p>
-                <div class="pill-row">
-                  <span class="chip" v-for="gap in store.lastQuestionIngest.top_gaps_found" :key="gap">
-                    {{ gap }}
-                  </span>
+              <article v-if="questionWorkflowStatus" class="detail-card question-workflow-card">
+                <div class="question-workflow-card__header">
+                  <div>
+                    <p class="eyebrow">Workflow status</p>
+                    <h4>{{ questionWorkflowStatus.title }}</h4>
+                  </div>
+                  <span class="chip">{{ questionWorkflowStatus.badge }}</span>
                 </div>
+                <p class="muted-copy prewrap">{{ questionWorkflowStatus.description }}</p>
               </article>
             </div>
           </template>
         </section>
 
-        <section class="panel section-stack">
+        <section v-if="store.currentSourceTab === 'question'" class="panel section-stack">
+          <div>
+            <p class="eyebrow">Question bank</p>
+            <h3 class="section-title">Saved sets with evaluation summaries</h3>
+          </div>
+          <el-switch
+            v-model="showOnlyActive"
+            active-text="Active only"
+            inactive-text="Include archived"
+          />
+          <div v-if="(documentsData ?? []).length" class="document-list">
+            <article
+              class="document-card question-bank-card"
+              :class="{ 'is-selected': store.selectedDocumentId === doc.document_id }"
+              v-for="doc in documentsData ?? []"
+              :key="doc.document_id"
+              @click="selectDocument(doc.document_id)"
+            >
+              <div class="status-row">
+                <span class="chip">{{ questionBankStatusLabel(doc.metadata) }}</span>
+                <span class="chip">{{ questionBankQuestionCount(doc.metadata) }} questions</span>
+              </div>
+              <h4>{{ questionBankTitle(doc) }}</h4>
+              <p class="muted-copy">{{ new Date(doc.created_at).toLocaleString() }}</p>
+              <p class="muted-copy prewrap">{{ questionBankSummary(doc.metadata) }}</p>
+              <div v-if="questionBankTopGaps(doc.metadata).length" class="pill-row">
+                <span class="chip" v-for="gap in questionBankTopGaps(doc.metadata)" :key="gap">{{ gap }}</span>
+              </div>
+            </article>
+          </div>
+          <article v-else class="detail-card">
+            <p class="muted-copy">No saved question banks yet.</p>
+          </article>
+
+          <article v-if="selectedQuestionBank" class="detail-card question-bank-detail">
+            <div class="question-bank-detail__header">
+              <div>
+                <p class="eyebrow">Question bank</p>
+                <h4>{{ questionBankTitle(selectedQuestionBank) }}</h4>
+              </div>
+              <div class="status-row">
+                <span class="chip">{{ questionBankStatusLabel(selectedQuestionBank) }}</span>
+                <span class="chip">{{ questionBankOverallLabel(selectedQuestionBank.overall_mastery) }}</span>
+              </div>
+            </div>
+            <dl class="metadata-grid">
+              <div v-if="metadataString(selectedQuestionBank.metadata, 'source_company')">
+                <dt>Company</dt>
+                <dd>{{ metadataString(selectedQuestionBank.metadata, "source_company") }}</dd>
+              </div>
+              <div v-if="metadataString(selectedQuestionBank.metadata, 'source_role')">
+                <dt>Role</dt>
+                <dd>{{ metadataString(selectedQuestionBank.metadata, "source_role") }}</dd>
+              </div>
+              <div>
+                <dt>Created at</dt>
+                <dd>{{ new Date(selectedQuestionBank.created_at).toLocaleString() }}</dd>
+              </div>
+              <div>
+                <dt>Questions</dt>
+                <dd>{{ selectedQuestionBank.question_count }}</dd>
+              </div>
+            </dl>
+            <p v-if="selectedQuestionBank.summary" class="muted-copy prewrap">{{ selectedQuestionBank.summary }}</p>
+            <div class="status-row">
+              <span class="chip">strong {{ masteryCount(selectedQuestionBank.mastery_counts, "熟练掌握") }}</span>
+              <span class="chip">partial {{ masteryCount(selectedQuestionBank.mastery_counts, "部分掌握") }}</span>
+              <span class="chip">repair {{ masteryCount(selectedQuestionBank.mastery_counts, "需要加强") }}</span>
+              <span class="chip">pending {{ masteryCount(selectedQuestionBank.mastery_counts, "未评估") }}</span>
+            </div>
+            <div v-if="selectedQuestionBank.top_gaps_found.length" class="pill-row">
+              <span class="chip" v-for="gap in selectedQuestionBank.top_gaps_found" :key="gap">{{ gap }}</span>
+            </div>
+            <div v-if="selectedQuestionBank.records.length" class="question-feedback-list">
+              <article
+                class="question-feedback-card"
+                v-for="record in selectedQuestionBank.records"
+                :key="record.question_id"
+              >
+                <div class="question-feedback-card__header">
+                  <div>
+                    <p class="eyebrow">Question</p>
+                    <h4>{{ record.question }}</h4>
+                  </div>
+                  <div class="status-row">
+                    <span class="chip">{{ masteryTone(record.mastery_level, record.evaluation_status).label }}</span>
+                    <span class="chip">{{ record.dimension }}</span>
+                  </div>
+                </div>
+                <div v-if="record.topics.length" class="pill-row">
+                  <span class="chip" v-for="topic in record.topics" :key="topic">{{ topic }}</span>
+                </div>
+                <section v-if="record.evaluation_status === 'pending'" class="detail-card question-feedback-card__summary">
+                  <p class="eyebrow">Pending evaluation</p>
+                  <p class="prewrap">
+                    This set is already stored. Detailed scoring is still running question-by-question.
+                  </p>
+                </section>
+                <div v-else class="question-score-grid">
+                  <article class="detail-card question-score-card">
+                    <p class="eyebrow">Accuracy</p>
+                    <strong>{{ scoreLabel(record.accuracy_score) }}</strong>
+                    <p class="muted-copy">{{ scoreValue(record.accuracy_score) }}/5</p>
+                  </article>
+                  <article class="detail-card question-score-card">
+                    <p class="eyebrow">Structure</p>
+                    <strong>{{ scoreLabel(record.structure_score) }}</strong>
+                    <p class="muted-copy">{{ scoreValue(record.structure_score) }}/5</p>
+                  </article>
+                  <article class="detail-card question-score-card">
+                    <p class="eyebrow">Depth</p>
+                    <strong>{{ scoreLabel(record.depth_score) }}</strong>
+                    <p class="muted-copy">{{ scoreValue(record.depth_score) }}/5</p>
+                  </article>
+                </div>
+                <section v-if="record.score_summary" class="detail-card question-feedback-card__summary">
+                  <p class="eyebrow">Coach summary</p>
+                  <p class="prewrap">{{ record.score_summary }}</p>
+                </section>
+                <div v-if="record.evaluation_status !== 'pending'" class="question-feedback-grid">
+                  <section class="detail-card">
+                    <p class="eyebrow">Your answer</p>
+                    <p class="prewrap">{{ record.user_answer || "No answer supplied." }}</p>
+                  </section>
+                  <section class="detail-card question-feedback-card__reference">
+                    <p class="eyebrow">Reference answer</p>
+                    <p class="prewrap">{{ record.reference_answer }}</p>
+                  </section>
+                </div>
+                <div class="question-feedback-grid">
+                  <section class="detail-card">
+                    <p class="eyebrow">Missing or weak points</p>
+                    <ul class="feedback-list">
+                      <li v-for="gap in record.gaps" :key="gap">{{ gap }}</li>
+                    </ul>
+                  </section>
+                  <section class="detail-card">
+                    <p class="eyebrow">Suggested follow-up</p>
+                    <ul class="feedback-list">
+                      <li v-for="probe in record.next_probe" :key="probe">{{ probe }}</li>
+                    </ul>
+                  </section>
+                </div>
+              </article>
+            </div>
+          </article>
+        </section>
+
+        <section v-else class="panel section-stack">
           <div>
             <p class="eyebrow">History</p>
             <h3 class="section-title">Recent document snapshots</h3>
@@ -234,74 +378,59 @@
             </article>
           </div>
 
-          <article v-if="selectedDocument" class="detail-card">
+          <article v-if="selectedDocumentDetail" class="detail-card">
             <p class="eyebrow">Preview</p>
-            <h4>{{ documentTitle(selectedDocument) }}</h4>
-            <template v-if="selectedDocument.source_type === 'jd'">
+            <h4>{{ documentTitle(selectedDocumentDetail) }}</h4>
+            <template v-if="selectedDocumentDetail.source_type === 'jd'">
               <dl class="metadata-grid">
-                <div v-if="metadataString(selectedDocument.metadata, 'company')">
+                <div v-if="metadataString(selectedDocumentDetail.metadata, 'company')">
                   <dt>Company</dt>
-                  <dd>{{ metadataString(selectedDocument.metadata, "company") }}</dd>
+                  <dd>{{ metadataString(selectedDocumentDetail.metadata, "company") }}</dd>
                 </div>
-                <div v-if="metadataString(selectedDocument.metadata, 'role')">
+                <div v-if="metadataString(selectedDocumentDetail.metadata, 'role')">
                   <dt>Role</dt>
-                  <dd>{{ metadataString(selectedDocument.metadata, "role") }}</dd>
+                  <dd>{{ metadataString(selectedDocumentDetail.metadata, "role") }}</dd>
                 </div>
-                <div v-if="metadataString(selectedDocument.metadata, 'url')">
+                <div v-if="metadataString(selectedDocumentDetail.metadata, 'url')">
                   <dt>URL</dt>
                   <dd>
                     <a
-                      :href="metadataString(selectedDocument.metadata, 'url')"
+                      :href="metadataString(selectedDocumentDetail.metadata, 'url')"
                       class="external-url"
                       target="_blank"
                       rel="noopener noreferrer"
-                      :title="metadataString(selectedDocument.metadata, 'url')"
+                      :title="metadataString(selectedDocumentDetail.metadata, 'url')"
                     >
-                      {{ formatUrlLabel(metadataString(selectedDocument.metadata, "url")) }}
+                      {{ formatUrlLabel(metadataString(selectedDocumentDetail.metadata, "url")) }}
                     </a>
                   </dd>
                 </div>
                 <div>
                   <dt>Created at</dt>
-                  <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
+                  <dd>{{ new Date(selectedDocumentDetail.created_at).toLocaleString() }}</dd>
                 </div>
               </dl>
-              <template v-if="hasJdSections(selectedDocument.metadata)">
-                <div v-if="metadataString(selectedDocument.metadata, 'job_description')">
+              <template v-if="hasJdSections(selectedDocumentDetail.metadata)">
+                <div v-if="metadataString(selectedDocumentDetail.metadata, 'job_description')">
                   <p class="eyebrow">Position description</p>
-                  <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_description") }}</pre>
+                  <pre class="raw-preview">{{ metadataString(selectedDocumentDetail.metadata, "job_description") }}</pre>
                 </div>
-                <div v-if="metadataString(selectedDocument.metadata, 'job_requirements')">
+                <div v-if="metadataString(selectedDocumentDetail.metadata, 'job_requirements')">
                   <p class="eyebrow">Position requirements</p>
-                  <pre class="raw-preview">{{ metadataString(selectedDocument.metadata, "job_requirements") }}</pre>
+                  <pre class="raw-preview">{{ metadataString(selectedDocumentDetail.metadata, "job_requirements") }}</pre>
                 </div>
               </template>
-              <pre v-else class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
-            </template>
-
-            <template v-else-if="selectedDocument.source_type === 'question'">
-              <dl class="metadata-grid">
-                <div v-if="metadataString(selectedDocument.metadata, 'source_scope')">
-                  <dt>Question bank</dt>
-                  <dd>{{ metadataString(selectedDocument.metadata, "source_scope") }}</dd>
-                </div>
-                <div>
-                  <dt>Created at</dt>
-                  <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
-                </div>
-              </dl>
-              <p class="eyebrow">Question set preview</p>
-              <pre class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
+              <pre v-else class="raw-preview">{{ selectedDocumentDetail.raw_text_preview }}</pre>
             </template>
 
             <template v-else>
               <dl class="metadata-grid">
                 <div>
                   <dt>Created at</dt>
-                  <dd>{{ new Date(selectedDocument.created_at).toLocaleString() }}</dd>
+                  <dd>{{ new Date(selectedDocumentDetail.created_at).toLocaleString() }}</dd>
                 </div>
               </dl>
-              <pre class="raw-preview">{{ selectedDocument.raw_text_preview }}</pre>
+              <pre class="raw-preview">{{ selectedDocumentDetail.raw_text_preview }}</pre>
             </template>
           </article>
         </section>
@@ -313,6 +442,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { ElMessage } from "element-plus";
 
 import AppShell from "../components/AppShell.vue";
 import CurrentJdPicker from "../components/CurrentJdPicker.vue";
@@ -393,10 +523,16 @@ const { data: documentsData } = useQuery({
   enabled: computed(() => store.currentSourceTab !== "resume"),
 });
 
-const { data: selectedDocument } = useQuery({
+const { data: selectedDocumentDetail } = useQuery({
   queryKey: computed(() => ["document-detail", store.selectedDocumentId]),
   queryFn: () => api.getDocumentDetail(store.selectedDocumentId),
-  enabled: computed(() => store.currentSourceTab !== "resume" && Boolean(store.selectedDocumentId)),
+  enabled: computed(() => store.currentSourceTab === "jd" && Boolean(store.selectedDocumentId)),
+});
+
+const { data: selectedQuestionBank } = useQuery({
+  queryKey: computed(() => ["question-bank-detail", store.selectedDocumentId]),
+  queryFn: () => api.getQuestionBankDetail(store.selectedDocumentId),
+  enabled: computed(() => store.currentSourceTab === "question" && Boolean(store.selectedDocumentId)),
 });
 
 const resumeSaveMutation = useMutation({
@@ -514,16 +650,73 @@ const questionMutation = useMutation({
       content_base64: pendingQuestionBase64.value || undefined,
       source_company: store.questionCompanyDraft || undefined,
       source_role: store.questionRoleDraft || undefined,
+      evaluate_answers: false,
     }),
   onSuccess: async (data) => {
     store.lastQuestionIngest = data;
+    store.lastQuestionEvaluation = null;
+    store.selectedDocumentId = data.document_id;
+    store.questionDraft = "";
     pendingQuestionBase64.value = "";
     pendingQuestionFilename.value = "";
     await queryClient.invalidateQueries({ queryKey: ["documents"] });
     await queryClient.invalidateQueries({ queryKey: ["overview"] });
+    questionEvaluateMutation.mutate(data.document_id);
+  },
+  onError: (error) => {
+    ElMessage.error(extractErrorMessage(error));
   },
 });
 const questionPending = computed(() => questionMutation.isPending.value);
+const questionSubmitPending = computed(() => questionPending.value || questionEvaluatePending.value);
+const questionEvaluateMutation = useMutation({
+  mutationFn: (documentId: string) => api.evaluateQuestions(documentId),
+  onSuccess: async (data) => {
+    store.lastQuestionEvaluation = data;
+    store.selectedDocumentId = data.document_id;
+    await queryClient.invalidateQueries({ queryKey: ["question-bank-detail", data.document_id] });
+    await queryClient.invalidateQueries({ queryKey: ["documents"] });
+    await queryClient.invalidateQueries({ queryKey: ["diagnosis"] });
+    await queryClient.invalidateQueries({ queryKey: ["overview"] });
+  },
+  onError: (error) => {
+    ElMessage.error(extractErrorMessage(error));
+  },
+});
+const questionEvaluatePending = computed(() => questionEvaluateMutation.isPending.value);
+const questionWorkflowStatus = computed(() => {
+  if (questionPending.value) {
+    return {
+      title: "Saving question set",
+      badge: "saving",
+      description: "Parsing the pasted content and writing the latest question set into this workspace.",
+    };
+  }
+  if (questionEvaluatePending.value) {
+    return {
+      title: "Evaluating answers one by one",
+      badge: "evaluating",
+      description:
+        "The set is already saved. Detailed scoring is running question-by-question, so this step can take longer.",
+    };
+  }
+  if (!store.lastQuestionIngest) {
+    return null;
+  }
+  if (store.lastQuestionEvaluation) {
+    return {
+      title: "Evaluation finished",
+      badge: "evaluated",
+      description:
+        "This set is now in the question bank below. Open the card to review question-by-question feedback.",
+      };
+  }
+  return {
+    title: "Saved, preparing evaluation",
+    badge: "saved",
+    description: "The set is stored already and is about to continue into question-by-question evaluation.",
+  };
+});
 
 const resumeTailorMutation = useMutation({
   mutationFn: () => api.getResumeTailorDraft(store.selectedJdId || undefined),
@@ -656,6 +849,138 @@ function documentTitle(document: {
     }
   }
   return document.filename || document.document_id;
+}
+
+function questionBankTitle(document: {
+  document_id: string;
+  filename: string | null;
+  metadata: Record<string, unknown>;
+}): string {
+  const company = metadataString(document.metadata, "source_company");
+  const role = metadataString(document.metadata, "source_role");
+  const sourceScope = metadataString(document.metadata, "source_scope");
+  if (company && role) {
+    return `${company} · ${role}`;
+  }
+  if (role || company) {
+    return role || company;
+  }
+  if (sourceScope) {
+    return sourceScope;
+  }
+  return document.filename || document.document_id;
+}
+
+function questionBankSummary(metadata: Record<string, unknown>): string {
+  const summary = metadataString(metadata, "summary");
+  if (summary) {
+    return summary;
+  }
+  const questionCount = questionBankQuestionCount(metadata);
+  if (!questionCount) {
+    return "No parsed questions yet.";
+  }
+  return `${questionCount} saved questions.`;
+}
+
+function questionBankStatusLabel(
+  metadata: Record<string, unknown> | { metadata: Record<string, unknown>; evaluation_status: string }
+): string {
+  let value = "";
+  if ("metadata" in metadata) {
+    const detail = metadata as { metadata: Record<string, unknown>; evaluation_status: string };
+    value = metadataString(detail.metadata, "evaluation_status") || detail.evaluation_status;
+  } else {
+    value = metadataString(metadata as Record<string, unknown>, "evaluation_status");
+  }
+  if (value === "completed") {
+    return "evaluated";
+  }
+  if (value === "partial") {
+    return "partially evaluated";
+  }
+  return "awaiting evaluation";
+}
+
+function questionBankOverallLabel(value: string | null | undefined): string {
+  if (value === "mostly_strong") {
+    return "mostly strong";
+  }
+  if (value === "repair_priority") {
+    return "repair priority";
+  }
+  if (value === "mixed") {
+    return "mixed mastery";
+  }
+  if (value === "awaiting_evaluation") {
+    return "awaiting evaluation";
+  }
+  if (value === "empty") {
+    return "empty set";
+  }
+  return "question bank";
+}
+
+function questionBankQuestionCount(metadata: Record<string, unknown>): number {
+  const value = metadata["question_count"];
+  return typeof value === "number" ? value : 0;
+}
+
+function questionBankTopGaps(metadata: Record<string, unknown>): string[] {
+  const value = metadata["top_gaps_found"];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function masteryCount(masteryCounts: Record<string, number>, key: string): number {
+  const value = masteryCounts[key];
+  return typeof value === "number" ? value : 0;
+}
+
+function masteryTone(masteryLevel: string, evaluationStatus = "completed"): { label: string } {
+  if (evaluationStatus === "pending") {
+    return { label: "awaiting evaluation" };
+  }
+  if (masteryLevel === "熟练掌握") {
+    return { label: "strong answer" };
+  }
+  if (masteryLevel === "部分掌握") {
+    return { label: "needs more depth" };
+  }
+  return { label: "repair this answer" };
+}
+
+function scoreValue(score: number | null): string {
+  if (typeof score !== "number") {
+    return "--";
+  }
+  return String(Math.min(5, Math.max(1, Math.round(score))));
+}
+
+function scoreLabel(score: number | null): string {
+  if (typeof score !== "number") {
+    return "Pending";
+  }
+  const normalized = Math.min(5, Math.max(1, Math.round(score)));
+  if (normalized >= 4) {
+    return "Strong";
+  }
+  if (normalized === 3) {
+    return "Mixed";
+  }
+  return "Weak";
+}
+
+function extractErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "Request failed. Check the backend logs for details.";
 }
 
 function syncViewportMode() {
@@ -901,6 +1226,84 @@ function stopResumePaneResize() {
   gap: 14px;
 }
 
+.question-bank-card,
+.question-workflow-card {
+  display: grid;
+  gap: 12px;
+}
+
+.question-workflow-card {
+  background: rgba(218, 119, 55, 0.08);
+}
+
+.question-workflow-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.question-bank-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.question-bank-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.question-feedback-list,
+.question-feedback-card,
+.question-feedback-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.question-feedback-card {
+  padding-top: 6px;
+  border-top: 1px solid rgba(109, 88, 74, 0.14);
+}
+
+.question-feedback-card:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.question-feedback-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.question-feedback-card__reference {
+  background: rgba(189, 94, 44, 0.08);
+}
+
+.question-feedback-card__summary {
+  background: rgba(218, 119, 55, 0.08);
+}
+
+.question-score-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.question-score-card {
+  gap: 6px;
+}
+
+.feedback-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
 .tailor-list {
   margin: 0;
   padding-left: 18px;
@@ -917,6 +1320,16 @@ function stopResumePaneResize() {
 @media (max-width: 768px) {
   .source-nav__button {
     padding: 12px 14px;
+  }
+
+  .question-bank-detail__header,
+  .question-workflow-card__header,
+  .question-feedback-card__header {
+    flex-direction: column;
+  }
+
+  .question-score-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

@@ -1,7 +1,7 @@
 import { computed, ref, watch } from "vue";
 import { defineStore } from "pinia";
 
-import type { AgentTurnResponse, QuestionIngestResponse } from "../types/api";
+import type { AgentTurnResponse, QuestionEvaluateResponse, QuestionIngestResponse } from "../types/api";
 
 export interface ChatEntry {
   id: string;
@@ -36,6 +36,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   const questionCompanyDraft = ref("");
   const questionRoleDraft = ref("");
   const lastQuestionIngest = ref<QuestionIngestResponse | null>(null);
+  const lastQuestionEvaluation = ref<QuestionEvaluateResponse | null>(null);
   const chatTranscript = ref<ChatEntry[]>(loadChatTranscript());
 
   watch(
@@ -108,6 +109,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     jdRoleDraft,
     jdUrlDraft,
     lastQuestionIngest,
+    lastQuestionEvaluation,
     questionCompanyDraft,
     questionDraft,
     questionRoleDraft,

@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from interview_agent.agent.runtime import AgentTurnRequest as RuntimeAgentTurnRequest
 from interview_agent.actions.ticktick import SyncMode
 from interview_agent.app.config import get_settings
+from interview_agent.app.providers import EmbeddingProviderError
 from interview_agent.app.schemas import (
     AgentTurnRequest,
     AgentTurnResponse,
@@ -28,6 +29,9 @@ from interview_agent.app.schemas import (
     PlanResponse,
     ProactiveTickRequest,
     ProactiveTickResponse,
+    QuestionBankDetailResponse,
+    QuestionEvaluateRequest,
+    QuestionEvaluateResponse,
     QuestionIngestRequest,
     QuestionIngestResponse,
     ResumeCompileResponse,
@@ -253,6 +257,34 @@ def _document_summary_response(document) -> DocumentSummaryResponse:
     )
 
 
+def _metadata_string(metadata: dict[str, object], key: str) -> str | None:
+    value = metadata.get(key)
+    if isinstance(value, str):
+        normalized = value.strip()
+        return normalized or None
+    return None
+
+
+def _metadata_string_list(metadata: dict[str, object], key: str) -> list[str]:
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _metadata_int_map(metadata: dict[str, object], key: str) -> dict[str, int]:
+    value = metadata.get(key)
+    if not isinstance(value, dict):
+        return {}
+    output: dict[str, int] = {}
+    for item_key, item_value in value.items():
+        try:
+            output[str(item_key)] = int(item_value)
+        except (TypeError, ValueError):
+            continue
+    return output
+
+
 def _sync_mode(container: AppContainer) -> SyncMode:
     return "live" if container.settings.dida365_enabled else "dry_run"
 
@@ -294,6 +326,8 @@ async def root() -> dict[str, object]:
             "jds": "/jds",
             "jds_current": "/jds/current",
             "ingest_questions": "/ingest/questions",
+            "evaluate_questions": "/questions/evaluate",
+            "question_bank_detail": "/questions/banks/{document_id}",
             "diagnosis_gap": "/diagnosis/gap",
             "diagnosis_current": "/diagnosis/current",
             "plan_generate": "/plan/generate",
@@ -371,13 +405,16 @@ async def ingest_resume(http_request: Request, request: ResumeIngestRequest) -> 
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
-        result = container.resume_workspace.save_imported_source(
-            session,
-            user_id=user_id,
-            text=request.text,
-            content_base64=request.content_base64,
-            filename=request.filename,
-        )
+        try:
+            result = container.resume_workspace.save_imported_source(
+                session,
+                user_id=user_id,
+                text=request.text,
+                content_base64=request.content_base64,
+                filename=request.filename,
+            )
+        except EmbeddingProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         return IngestResponse(
             document_id=result.last_resume_document_id or "",
             chunk_count=result.chunk_count,
@@ -404,15 +441,18 @@ async def ingest_jd(http_request: Request, request: JDIngestRequest) -> IngestRe
         "job_requirements": job_requirements,
     }
     with container.db.session_scope() as session:
-        result = container.document_ingestion.ingest_document(
-            session,
-            user_id=user_id,
-            source_type="jd",
-            text=resolved_text,
-            content_base64=request.content_base64,
-            filename=request.filename,
-            metadata=metadata,
-        )
+        try:
+            result = container.document_ingestion.ingest_document(
+                session,
+                user_id=user_id,
+                source_type="jd",
+                text=resolved_text,
+                content_base64=request.content_base64,
+                filename=request.filename,
+                metadata=metadata,
+            )
+        except EmbeddingProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         if not job_description and not job_requirements:
             job_description, job_requirements = split_jd_sections(result.raw_text)
             metadata = {
@@ -480,16 +520,20 @@ async def ingest_questions(http_request: Request, request: QuestionIngestRequest
     container = _container(http_request)
     user_id = _user_id(container, request.user_id)
     with container.db.session_scope() as session:
-        result = container.question_ingestion.ingest_questions(
-            session,
-            user_id=user_id,
-            text=request.text,
-            content_base64=request.content_base64,
-            filename=request.filename,
-            metadata=request.metadata,
-            source_company=request.source_company,
-            source_role=request.source_role,
-        )
+        try:
+            result = container.question_ingestion.ingest_questions(
+                session,
+                user_id=user_id,
+                text=request.text,
+                content_base64=request.content_base64,
+                filename=request.filename,
+                metadata=request.metadata,
+                source_company=request.source_company,
+                source_role=request.source_role,
+                evaluate_answers=request.evaluate_answers,
+            )
+        except EmbeddingProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
         top_gaps = [record["gaps"][0] for record in result.records[:3] if record["gaps"]]
         return QuestionIngestResponse(
             document_id=result.ingested_document.document_id,
@@ -502,6 +546,30 @@ async def ingest_questions(http_request: Request, request: QuestionIngestRequest
             inactive_count=result.inactive_count,
             fallback_used=result.fallback_used,
             pipeline_version=result.pipeline_version,
+            top_gaps_found=top_gaps,
+            records=result.records,
+        )
+
+
+@router.post("/questions/evaluate", response_model=QuestionEvaluateResponse)
+async def evaluate_questions(http_request: Request, request: QuestionEvaluateRequest) -> QuestionEvaluateResponse:
+    container = _container(http_request)
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        try:
+            result = container.question_ingestion.evaluate_question_document(
+                session,
+                user_id=user_id,
+                document_id=request.document_id,
+            )
+        except EmbeddingProviderError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        top_gaps = [record["gaps"][0] for record in result.records[:3] if record["gaps"]]
+        return QuestionEvaluateResponse(
+            document_id=result.document_id,
+            evaluated_count=len(result.records),
             top_gaps_found=top_gaps,
             records=result.records,
         )
@@ -690,6 +758,37 @@ async def document_detail(http_request: Request, document_id: str) -> DocumentDe
         return DocumentDetailResponse(
             **summary.model_dump(),
             raw_text_preview=document.raw_text[:4000],
+        )
+
+
+@router.get("/questions/banks/{document_id}", response_model=QuestionBankDetailResponse)
+async def question_bank_detail(
+    http_request: Request,
+    document_id: str,
+    user_id: str | None = None,
+) -> QuestionBankDetailResponse:
+    container = _container(http_request)
+    resolved_user_id = _user_id(container, user_id)
+    with container.db.session_scope() as session:
+        document = container.repository.get_document(session, document_id=document_id)
+        if document is None or document.user_id != resolved_user_id or document.source_type != "question":
+            raise HTTPException(status_code=404, detail=f"Question document {document_id!r} was not found.")
+        records_result = container.question_ingestion.get_question_document_records(
+            session,
+            user_id=resolved_user_id,
+            document_id=document_id,
+        )
+        summary = _document_summary_response(document)
+        metadata = document.metadata_json or {}
+        return QuestionBankDetailResponse(
+            **summary.model_dump(),
+            question_count=int(metadata.get("question_count") or len(records_result.records)),
+            evaluation_status=_metadata_string(metadata, "evaluation_status") or "pending",
+            overall_mastery=_metadata_string(metadata, "overall_mastery"),
+            summary=_metadata_string(metadata, "summary"),
+            top_gaps_found=_metadata_string_list(metadata, "top_gaps_found"),
+            mastery_counts=_metadata_int_map(metadata, "mastery_counts"),
+            records=records_result.records,
         )
 
 

@@ -48,6 +48,74 @@ def test_topic_dimension_and_answer_evaluation() -> None:
     assert all(isinstance(item, str) for item in gaps)
 
 
+def test_llm_question_prefers_rag_dimension_over_backend_fallback() -> None:
+    question = "kv cache 是什么，为什么能显著提升大模型推理吞吐？"
+
+    topics = infer_topics(question)
+    dimension = infer_dimension(question, topics)
+
+    assert "LLM基础" in topics or "推理优化" in topics
+    assert dimension == "llm_inference_serving"
+
+
+def test_topic_hints_can_reclassify_implicit_llm_questions() -> None:
+    question = "秩 r 的选择会对模型表现产生什么影响？"
+    topics = ["LoRA", "秩", "超参数", "微调效率"]
+
+    dimension = infer_dimension(question, topics)
+
+    assert dimension == "post_training_alignment"
+
+
+def test_transformer_structure_maps_to_llm_foundations() -> None:
+    question = "请介绍 Transformer 的结构组成及各部分作用？"
+
+    topics = infer_topics(question)
+    dimension = infer_dimension(question, topics)
+
+    assert "LLM基础" in topics
+    assert dimension == "llm_foundations"
+
+
+def test_rag_question_maps_to_rag_retrieval() -> None:
+    question = "RAG 系统里如何做召回、重排和 faithfulness 评测？"
+
+    topics = infer_topics(question)
+    dimension = infer_dimension(question, topics)
+
+    assert "RAG" in topics or "检索召回" in topics
+    assert dimension == "rag_retrieval"
+
+
+def test_agent_question_maps_to_agent_orchestration() -> None:
+    question = "多 Agent workflow 里如何做状态管理、工具调用和 human-in-the-loop？"
+
+    topics = infer_topics(question)
+    dimension = infer_dimension(question, topics)
+
+    assert "Agent" in topics or "HITL" in topics
+    assert dimension == "agent_orchestration"
+
+
+def test_eval_question_maps_to_llm_evaluation() -> None:
+    question = "你会如何设计 hallucination、groundedness 和 win-rate 的评测体系？"
+
+    topics = infer_topics(question)
+    dimension = infer_dimension(question, topics)
+
+    assert "LLM评测" in topics or "事实性评估" in topics
+    assert dimension == "llm_evaluation"
+
+
+def test_system_design_overrides_llm_when_design_signal_is_strong() -> None:
+    question = "如果你要在 GPU 资源有限的条件下同时提供推理和微调服务，如何做资源分配和任务调度以保证时延和吞吐？"
+
+    topics = infer_topics(question)
+    dimension = infer_dimension(question, topics)
+
+    assert dimension == "system_design"
+
+
 def test_split_jd_sections_extracts_description_and_requirements() -> None:
     raw_text = """
 职位描述

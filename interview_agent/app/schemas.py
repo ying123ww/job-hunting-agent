@@ -53,6 +53,12 @@ class JDIngestRequest(BaseIngestRequest):
 class QuestionIngestRequest(BaseIngestRequest):
     source_company: str | None = None
     source_role: str | None = None
+    evaluate_answers: bool = True
+
+
+class QuestionEvaluateRequest(BaseModel):
+    user_id: str | None = None
+    document_id: str
 
 
 class IngestResponse(BaseModel):
@@ -97,6 +103,11 @@ class QuestionRecordResponse(BaseModel):
     mastery_level: str
     gaps: list[str]
     next_probe: list[str]
+    accuracy_score: int | None = None
+    structure_score: int | None = None
+    depth_score: int | None = None
+    score_summary: str | None = None
+    evaluation_status: str = "completed"
 
 
 class QuestionIngestResponse(IngestResponse):
@@ -106,6 +117,13 @@ class QuestionIngestResponse(IngestResponse):
     inactive_count: int = 0
     fallback_used: bool = False
     pipeline_version: str = "question_ingestion_v2"
+    top_gaps_found: list[str]
+    records: list[QuestionRecordResponse]
+
+
+class QuestionEvaluateResponse(BaseModel):
+    document_id: str
+    evaluated_count: int
     top_gaps_found: list[str]
     records: list[QuestionRecordResponse]
 
@@ -179,6 +197,16 @@ class DocumentSummaryResponse(BaseModel):
 
 class DocumentDetailResponse(DocumentSummaryResponse):
     raw_text_preview: str
+
+
+class QuestionBankDetailResponse(DocumentSummaryResponse):
+    question_count: int = 0
+    evaluation_status: str = "pending"
+    overall_mastery: str | None = None
+    summary: str | None = None
+    top_gaps_found: list[str] = Field(default_factory=list)
+    mastery_counts: dict[str, int] = Field(default_factory=dict)
+    records: list[QuestionRecordResponse]
 
 
 class WorkspaceOverviewResponse(BaseModel):

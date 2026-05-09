@@ -89,6 +89,11 @@ export interface QuestionRecordResponse {
   mastery_level: string;
   gaps: string[];
   next_probe: string[];
+  accuracy_score: number | null;
+  structure_score: number | null;
+  depth_score: number | null;
+  score_summary: string | null;
+  evaluation_status: string;
 }
 
 export interface QuestionIngestResponse extends IngestResponse {
@@ -98,6 +103,13 @@ export interface QuestionIngestResponse extends IngestResponse {
   inactive_count: number;
   fallback_used: boolean;
   pipeline_version: string;
+  top_gaps_found: string[];
+  records: QuestionRecordResponse[];
+}
+
+export interface QuestionEvaluateResponse {
+  document_id: string;
+  evaluated_count: number;
   top_gaps_found: string[];
   records: QuestionRecordResponse[];
 }
@@ -140,6 +152,16 @@ export interface DocumentDetailResponse extends DocumentSummaryResponse {
   raw_text_preview: string;
 }
 
+export interface QuestionBankDetailResponse extends DocumentSummaryResponse {
+  question_count: number;
+  evaluation_status: string;
+  overall_mastery: string | null;
+  summary: string | null;
+  top_gaps_found: string[];
+  mastery_counts: Record<string, number>;
+  records: QuestionRecordResponse[];
+}
+
 export interface WorkspaceOverviewResponse {
   active_document_counts: Record<string, number>;
   latest_overall_risk: string | null;
@@ -179,4 +201,5 @@ export interface JDIngestPayload extends ResumeIngestPayload {
 export interface QuestionIngestPayload extends ResumeIngestPayload {
   source_company?: string;
   source_role?: string;
+  evaluate_answers?: boolean;
 }

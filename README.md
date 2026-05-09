@@ -330,6 +330,7 @@ cp .env.example .env
 ```bash
 .venv/bin/python -m interview_agent api --workspace ./workspaces/smoke-001 --reload
 ```
+.venv/bin/python -m interview_agent api --workspace ./workspaces --reload
 
 启动后默认地址：
 

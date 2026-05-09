@@ -175,7 +175,15 @@ class RetrievalService:
                 metadata_summary={
                     key: value
                     for key, value in item.metadata.items()
-                    if key in {"question_id", "dimension", "topics_text"}
+                    if key in {
+                        "question_id",
+                        "dimension",
+                        "topics_text",
+                        "accuracy_score",
+                        "structure_score",
+                        "depth_score",
+                        "score_summary",
+                    }
                 },
             )
             for item in merged.values()
@@ -223,7 +231,13 @@ class RetrievalService:
         lowered = query_text.lower()
         keyword_map = {
             "system_design": ("系统设计", "架构", "qps", "trade-off", "限流", "缓存"),
-            "rag_llm": ("rag", "llm", "agent", "评测", "faithfulness", "recall@k"),
+            "llm_foundations": ("transformer", "attention", "位置编码", "moe", "rwkv", "mamba", "decoder"),
+            "post_training_alignment": ("lora", "qlora", "sft", "dpo", "rlhf", "ppo", "微调", "偏好", "训练数据", "蒸馏"),
+            "llm_inference_serving": ("kv cache", "vllm", "量化", "显存", "推理", "吞吐", "时延", "batching", "prefill", "decode"),
+            "rag_retrieval": ("rag", "召回", "重排", "embedding", "向量库", "knowledge graph", "知识图谱", "citation"),
+            "agent_orchestration": ("agent", "workflow", "tool calling", "tools", "memory", "planning", "reflection", "human-in-the-loop"),
+            "llm_evaluation": ("评测", "benchmark", "faithfulness", "groundedness", "hallucination", "judge", "win-rate"),
+            "rag_llm": ("llm", "大模型"),
             "backend_basic": ("redis", "mysql", "epoll", "b+树", "数据库", "缓存"),
             "algorithm": ("算法", "链表", "树", "动态规划", "复杂度"),
             "behavioral": ("行为面", "自我介绍", "冲突", "优点", "缺点"),

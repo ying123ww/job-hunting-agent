@@ -22,6 +22,7 @@ class AppSettings(BaseSettings):
     embedding_api_key: str = Field(default="")
     llm_embedding_model: str = Field(default="text-embedding-3-small")
     embedding_dimensions: int = Field(default=64)
+    embedding_strict: bool = Field(default=False)
     text_chunk_size: int = Field(default=600)
     text_chunk_overlap: int = Field(default=80)
     tectonic_bin: str = Field(default="tectonic")

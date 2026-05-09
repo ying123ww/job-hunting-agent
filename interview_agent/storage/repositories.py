@@ -386,6 +386,23 @@ class InterviewRepository:
         stmt = stmt.order_by(desc(Question.last_answered_at))
         return list(session.scalars(stmt))
 
+    def list_questions_for_document(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        document_id: str,
+        active_only: bool = True,
+    ) -> list[Question]:
+        stmt = select(Question).where(
+            Question.user_id == user_id,
+            Question.document_id == document_id,
+        )
+        if active_only:
+            stmt = stmt.where(Question.is_active.is_(True))
+        stmt = stmt.order_by(Question.source_chunk_id)
+        return list(session.scalars(stmt))
+
     def list_answer_records_for_question(
         self,
         session: Session,

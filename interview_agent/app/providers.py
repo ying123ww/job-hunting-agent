@@ -2,12 +2,32 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 
 from interview_agent.app.config import AppSettings
+
+
+logger = logging.getLogger(__name__)
+REMOTE_EMBEDDING_BATCH_SIZE = 10
+
+
+class EmbeddingProviderError(RuntimeError):
+    pass
+
+
+def _format_embedding_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        body = response.text.strip()
+        suffix = f", body={body[:300]}" if body else ""
+        return f"HTTP {response.status_code}{suffix}"
+    if isinstance(exc, httpx.RequestError):
+        return str(exc) or exc.__class__.__name__
+    return str(exc) or exc.__class__.__name__
 
 
 def _hash_embedding(text: str, dimensions: int) -> list[float]:
@@ -64,15 +84,35 @@ class OpenAICompatibleProvider:
             "Authorization": f"Bearer {embedding_api_key}",
             "Content-Type": "application/json",
         }
-        with httpx.Client(timeout=30.0) as client:
-            response = client.post(
-                f"{embedding_base_url.rstrip('/')}/embeddings",
-                json=payload,
-                headers=headers,
-            )
-            response.raise_for_status()
-        data = response.json()["data"]
-        return [item["embedding"] for item in data]
+        try:
+            embeddings: list[list[float]] = []
+            with httpx.Client(timeout=30.0) as client:
+                for start in range(0, len(texts), REMOTE_EMBEDDING_BATCH_SIZE):
+                    batch = texts[start : start + REMOTE_EMBEDDING_BATCH_SIZE]
+                    response = client.post(
+                        f"{embedding_base_url.rstrip('/')}/embeddings",
+                        json={
+                            **payload,
+                            "input": batch,
+                        },
+                        headers=headers,
+                    )
+                    response.raise_for_status()
+                    data = response.json()["data"]
+                    embeddings.extend(item["embedding"] for item in data)
+            return embeddings
+        except Exception as exc:
+            if self.settings.embedding_strict:
+                raise EmbeddingProviderError(
+                    "Remote embedding request failed while strict mode is enabled. "
+                    f"endpoint={embedding_base_url.rstrip('/')}/embeddings, "
+                    f"model={self.settings.llm_embedding_model}, cause={_format_embedding_error(exc)}"
+                ) from exc
+            logger.warning("Embedding request failed; falling back to local hash embeddings: %s", exc)
+            return [
+                _hash_embedding(text, self.settings.embedding_dimensions)
+                for text in texts
+            ]
 
     def chat(
         self,

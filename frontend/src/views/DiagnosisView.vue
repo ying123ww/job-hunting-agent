@@ -34,8 +34,27 @@
           <article class="detail-card" v-for="item in gap.evidence" :key="item.chunk_id">
             <div class="status-row">
               <span class="chip">{{ item.source_type }}</span>
+              <span v-if="metadataLabel(item.metadata_summary, 'dimension')" class="chip">
+                {{ metadataLabel(item.metadata_summary, "dimension") }}
+              </span>
+              <span v-for="topic in metadataTopics(item.metadata_summary)" :key="`${item.chunk_id}-${topic}`" class="chip">
+                {{ topic }}
+              </span>
+              <span v-if="metadataScore(item.metadata_summary, 'accuracy_score')" class="chip">
+                accuracy {{ metadataScore(item.metadata_summary, "accuracy_score") }}/5
+              </span>
+              <span v-if="metadataScore(item.metadata_summary, 'structure_score')" class="chip">
+                structure {{ metadataScore(item.metadata_summary, "structure_score") }}/5
+              </span>
+              <span v-if="metadataScore(item.metadata_summary, 'depth_score')" class="chip">
+                depth {{ metadataScore(item.metadata_summary, "depth_score") }}/5
+              </span>
               <span class="chip">score {{ item.score.toFixed(2) }}</span>
             </div>
+            <p class="eyebrow">{{ evidenceTitle(item) }}</p>
+            <p v-if="metadataLabel(item.metadata_summary, 'score_summary')" class="muted-copy prewrap">
+              {{ metadataLabel(item.metadata_summary, "score_summary") }}
+            </p>
             <p class="prewrap">{{ item.text }}</p>
           </article>
         </div>
@@ -84,4 +103,42 @@ function severityType(severity: string) {
   if (severity === "medium") return "warning";
   return "success";
 }
+
+function metadataLabel(metadata: Record<string, unknown>, key: string): string {
+  const value = metadata[key];
+  return typeof value === "string" ? value : "";
+}
+
+function metadataTopics(metadata: Record<string, unknown>): string[] {
+  const raw = metadataLabel(metadata, "topics_text");
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function metadataScore(metadata: Record<string, unknown>, key: string): number | null {
+  const value = metadata[key];
+  return typeof value === "number" ? value : null;
+}
+
+function evidenceTitle(item: { source_type: string; metadata_summary: Record<string, unknown> }): string {
+  if (item.source_type === "question") {
+    return "Question-bank evidence";
+  }
+  if (item.source_type === "jd") {
+    return "Matched JD evidence";
+  }
+  if (item.source_type === "resume") {
+    return "Resume evidence";
+  }
+  return "Supporting evidence";
+}
 </script>
+
+<style scoped>
+.evidence-list {
+  display: grid;
+  gap: 12px;
+}
+</style>
