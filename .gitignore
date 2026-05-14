@@ -41,4 +41,5 @@ __pycache__/
 .env
 CHANGELOG.md
 workspace/
+tests/fixtures/eval_cases
 
