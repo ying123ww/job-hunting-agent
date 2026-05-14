@@ -1,0 +1,19 @@
+[
+  {
+    "id": "rag_project_resume_alignment",
+    "kind": "rag",
+    "intent": "qa",
+    "seed": {
+      "resume": "项目经历：构建 RAG 问答系统，包含文档切分、embedding 索引、混合召回和重排排序。",
+      "jd": "岗位要求：熟悉 RAG、向量检索、召回、重排、LLM 应用评测和效果优化。",
+      "questions": "RAG 系统如何提升检索效果？\n我的答案：可以做 query rewrite、混合召回和 rerank。"
+    },
+    "query": "我的 RAG 项目怎么对齐岗位要求？",
+    "expected": {
+      "dimension": "rag_retrieval",
+      "source_types": ["resume", "jd"],
+      "must_contain_any": ["RAG", "召回", "重排"],
+      "recall_at_k": 4
+    }
+  }
+]

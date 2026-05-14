@@ -6,6 +6,7 @@ pydantic-settings>=2.2.1
 pypdf>=4.2.0
 sqlalchemy>=2.0.30
 uvicorn>=0.30.0
+websockets>=16.0
 
 [dev]
 pytest>=8.2.0

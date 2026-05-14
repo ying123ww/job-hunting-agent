@@ -30,3 +30,27 @@ def test_priority_score_favors_stronger_signals() -> None:
 
     assert higher > lower
     assert round(higher, 4) == higher
+
+
+def test_priority_score_includes_diagnostic_signal_boosts() -> None:
+    base = compute_priority_score(
+        jd_weight=0.45,
+        weakness_severity=0.55,
+        evidence_confidence=0.7,
+        repeated_failure_factor=1.0,
+        recent_improvement=0.0,
+    )
+    boosted = compute_priority_score(
+        jd_weight=0.45,
+        weakness_severity=0.55,
+        evidence_confidence=0.7,
+        repeated_failure_factor=1.0,
+        recent_improvement=0.0,
+        answer_quality_penalty=0.7,
+        jd_coverage_gap=0.6,
+        evidence_gap=0.4,
+        recency_pressure=0.5,
+    )
+
+    assert boosted > base
+    assert boosted <= 1.0

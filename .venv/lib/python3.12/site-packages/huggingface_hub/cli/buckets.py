@@ -30,10 +30,7 @@ from huggingface_hub._buckets import (
 )
 from huggingface_hub.utils import (
     SoftTemporaryDirectory,
-    StatusLine,
-    are_progress_bars_disabled,
     disable_progress_bars,
-    enable_progress_bars,
 )
 
 from ._cli_utils import (
@@ -450,8 +447,7 @@ def remove(
     api = get_hf_api(token=token)
 
     if recursive:
-        status = StatusLine(enabled=out.mode == OutputFormatWithAuto.human)
-        status.update("Listing files from remote")
+        status = out.status("Listing files from remote")
 
         all_files: list[BucketFile] = []
         for item in api.list_bucket_tree(
@@ -709,7 +705,8 @@ def sync(
         "hf buckets cp my-config.json hf://buckets/user/my-bucket/logs/",
         "hf buckets cp my-config.json hf://buckets/user/my-bucket/remote-config.json",
         "hf buckets cp - hf://buckets/user/my-bucket/config.json",
-        "hf buckets cp hf://buckets/user/my-bucket/logs/ hf://buckets/user/archive-bucket/logs/",
+        "hf buckets cp hf://buckets/user/my-bucket/logs hf://buckets/user/archive-bucket/  # nests logs/ dir",
+        "hf buckets cp hf://buckets/user/my-bucket/logs/ hf://buckets/user/archive-bucket/  # copies contents only",
         "hf buckets cp hf://datasets/user/my-dataset/processed/ hf://buckets/user/my-bucket/dataset/processed/",
     ],
 )
@@ -774,19 +771,13 @@ def cp(
         if dst_is_stdout:
             # Download to stdout: always suppress progress bars to avoid polluting output
             # Only re-enable if they weren't already disabled by the caller
-            pbar_was_disabled = are_progress_bars_disabled()
-            if not pbar_was_disabled:
-                disable_progress_bars()
-            try:
+            with disable_progress_bars():
                 with SoftTemporaryDirectory() as tmp_dir:
                     tmp_path = os.path.join(tmp_dir, filename)
                     api.download_bucket_files(bucket_id, [(prefix, tmp_path)])
                     with open(tmp_path, "rb") as f:
                         while chunk := f.read(32_000_000):  # 32MB chunks
                             sys.stdout.buffer.write(chunk)
-            finally:
-                if not pbar_was_disabled:
-                    enable_progress_bars()
         else:
             # Download to file
             if dst is None:

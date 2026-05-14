@@ -1,0 +1,17 @@
+[
+  {
+    "id": "backend_gap_from_weak_redis_answer",
+    "kind": "diagnosis",
+    "seed": {
+      "resume": "项目经历：使用 Redis 做缓存，但没有展开 IO 多路复用、事件循环或缓存一致性细节。",
+      "jd": "岗位要求：熟悉 Redis、MySQL、IO 多路复用和缓存设计。",
+      "questions": "Redis 为什么单线程还这么快？\n我的答案：因为 Redis 是内存操作。"
+    },
+    "expected": {
+      "top_gap": "backend_basic",
+      "top_gap_in_top_k": 3,
+      "overall_risk_in": ["low", "medium", "high"],
+      "why_contains_any": ["综合短板强度", "质量缺口", "高频缺口"]
+    }
+  }
+]

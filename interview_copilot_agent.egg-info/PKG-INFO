@@ -11,5 +11,6 @@ Requires-Dist: pydantic-settings>=2.2.1
 Requires-Dist: pypdf>=4.2.0
 Requires-Dist: sqlalchemy>=2.0.30
 Requires-Dist: uvicorn>=0.30.0
+Requires-Dist: websockets>=16.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8.2.0; extra == "dev"

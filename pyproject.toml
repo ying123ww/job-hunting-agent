@@ -27,6 +27,10 @@ interview-agent = "interview_agent.cli:main"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.setuptools.packages.find]
+include = ["interview_agent*"]
+exclude = ["frontend*", "tests*", "workspace*"]
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
