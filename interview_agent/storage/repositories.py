@@ -15,6 +15,9 @@ from interview_agent.storage.models import (
     DocumentChunk,
     GapRecord,
     MemoryItem,
+    MockAnswer,
+    MockQuestion,
+    MockSession,
     Plan,
     Project,
     Question,
@@ -411,6 +414,160 @@ class InterviewRepository:
     ) -> list[AnswerRecord]:
         stmt = select(AnswerRecord).where(AnswerRecord.question_id == question_id).order_by(desc(AnswerRecord.answered_at))
         return list(session.scalars(stmt))
+
+    def create_mock_session(
+        self,
+        session: Session,
+        *,
+        user_id: str,
+        mode: str,
+        jd_id: str | None,
+        target_dimension: str | None,
+        question_count: int,
+        source_mix: dict[str, Any],
+    ) -> MockSession:
+        self.ensure_user(session, user_id)
+        item = MockSession(
+            user_id=user_id,
+            mode=mode,
+            jd_id=jd_id,
+            target_dimension=target_dimension,
+            status="draft",
+            question_count=question_count,
+            source_mix=source_mix,
+            summary="",
+        )
+        session.add(item)
+        session.flush()
+        return item
+
+    def create_mock_question(
+        self,
+        session: Session,
+        *,
+        session_id: str,
+        question_id: str | None,
+        prompt: str,
+        reference_answer: str,
+        dimension: str,
+        topics: list[str],
+        source_kind: str,
+        source_question_id: str | None,
+        evidence: list[dict[str, Any]],
+        position: int,
+    ) -> MockQuestion:
+        item = MockQuestion(
+            session_id=session_id,
+            question_id=question_id,
+            prompt=prompt,
+            reference_answer=reference_answer,
+            dimension=dimension,
+            topics=topics,
+            source_kind=source_kind,
+            source_question_id=source_question_id,
+            evidence=evidence,
+            position=position,
+        )
+        session.add(item)
+        session.flush()
+        return item
+
+    def get_mock_session(self, session: Session, *, session_id: str) -> MockSession | None:
+        return session.get(MockSession, session_id)
+
+    def list_mock_sessions(self, session: Session, *, user_id: str, limit: int = 20) -> list[MockSession]:
+        stmt = (
+            select(MockSession)
+            .where(MockSession.user_id == user_id)
+            .order_by(desc(MockSession.created_at))
+            .limit(limit)
+        )
+        return list(session.scalars(stmt))
+
+    def list_mock_questions(self, session: Session, *, session_id: str) -> list[MockQuestion]:
+        stmt = select(MockQuestion).where(MockQuestion.session_id == session_id).order_by(MockQuestion.position)
+        return list(session.scalars(stmt))
+
+    def get_mock_question(self, session: Session, *, mock_question_id: str) -> MockQuestion | None:
+        return session.get(MockQuestion, mock_question_id)
+
+    def upsert_mock_answer(
+        self,
+        session: Session,
+        *,
+        mock_question_id: str,
+        user_id: str,
+        user_answer: str,
+        mastery_level: str,
+        gaps: list[str],
+        next_probe: list[str],
+        accuracy_score: int | None,
+        structure_score: int | None,
+        depth_score: int | None,
+        score_summary: str | None,
+    ) -> MockAnswer:
+        existing = session.scalars(
+            select(MockAnswer).where(MockAnswer.mock_question_id == mock_question_id, MockAnswer.user_id == user_id)
+        ).first()
+        if existing is None:
+            existing = MockAnswer(
+                mock_question_id=mock_question_id,
+                user_id=user_id,
+                user_answer=user_answer,
+                mastery_level=mastery_level,
+                gaps=gaps,
+                next_probe=next_probe,
+                accuracy_score=accuracy_score,
+                structure_score=structure_score,
+                depth_score=depth_score,
+                score_summary=score_summary,
+            )
+            session.add(existing)
+        else:
+            existing.user_answer = user_answer
+            existing.mastery_level = mastery_level
+            existing.gaps = gaps
+            existing.next_probe = next_probe
+            existing.accuracy_score = accuracy_score
+            existing.structure_score = structure_score
+            existing.depth_score = depth_score
+            existing.score_summary = score_summary
+            existing.answered_at = utcnow()
+        session.flush()
+        return existing
+
+    def list_mock_answers_for_session(self, session: Session, *, session_id: str) -> list[MockAnswer]:
+        stmt = (
+            select(MockAnswer)
+            .join(MockQuestion, MockQuestion.id == MockAnswer.mock_question_id)
+            .where(MockQuestion.session_id == session_id)
+            .order_by(MockQuestion.position)
+        )
+        return list(session.scalars(stmt))
+
+    def update_mock_session_state(
+        self,
+        session: Session,
+        *,
+        session_id: str,
+        status: str | None = None,
+        summary: str | None = None,
+        completed_at: datetime | None = None,
+        source_mix: dict[str, Any] | None = None,
+    ) -> MockSession | None:
+        item = session.get(MockSession, session_id)
+        if item is None:
+            return None
+        if status is not None:
+            item.status = status
+        if summary is not None:
+            item.summary = summary
+        if completed_at is not None:
+            item.completed_at = completed_at
+        if source_mix is not None:
+            item.source_mix = source_mix
+        session.flush()
+        return item
 
     def get_target_jd(self, session: Session, *, jd_id: str) -> TargetJD | None:
         return session.get(TargetJD, jd_id)

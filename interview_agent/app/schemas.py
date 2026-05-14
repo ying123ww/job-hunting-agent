@@ -250,6 +250,72 @@ class ResumeTailorDraftResponse(BaseModel):
     suggestions: list[str]
 
 
+MockMode = Literal["weakness_global", "weakness_dimension", "jd"]
+
+
+class MockSessionCreateRequest(BaseModel):
+    user_id: str | None = None
+    mode: MockMode
+    jd_id: str | None = None
+    target_dimension: str | None = None
+    question_count: int = Field(default=20, ge=1, le=20)
+
+
+class MockAnswerSubmitItem(BaseModel):
+    mock_question_id: str
+    user_answer: str = Field(min_length=1)
+
+
+class MockAnswersSubmitRequest(BaseModel):
+    user_id: str | None = None
+    answers: list[MockAnswerSubmitItem]
+
+
+class MockSessionCompleteRequest(BaseModel):
+    user_id: str | None = None
+
+
+class MockAnswerResponse(BaseModel):
+    mock_answer_id: str
+    mock_question_id: str
+    user_answer: str
+    mastery_level: str
+    gaps: list[str]
+    next_probe: list[str]
+    accuracy_score: int | None = None
+    structure_score: int | None = None
+    depth_score: int | None = None
+    score_summary: str | None = None
+    answered_at: datetime
+
+
+class MockQuestionResponse(BaseModel):
+    mock_question_id: str
+    prompt: str
+    reference_answer: str
+    dimension: str
+    topics: list[str]
+    source_kind: Literal["original", "variant", "generated"]
+    source_question_id: str | None = None
+    evidence: list[dict[str, Any]] = Field(default_factory=list)
+    position: int
+    answer: MockAnswerResponse | None = None
+
+
+class MockSessionResponse(BaseModel):
+    session_id: str
+    mode: MockMode
+    jd_id: str | None = None
+    target_dimension: str | None = None
+    status: str
+    question_count: int
+    source_mix: dict[str, Any] = Field(default_factory=dict)
+    summary: str
+    created_at: datetime
+    completed_at: datetime | None = None
+    questions: list[MockQuestionResponse] = Field(default_factory=list)
+
+
 class SyncTickTickRequest(BaseModel):
     user_id: str | None = None
     plan_id: str | None = None

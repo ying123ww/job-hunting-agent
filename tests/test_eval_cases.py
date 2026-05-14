@@ -60,6 +60,8 @@ def test_eval_case(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, case: dict[s
             _assert_rag_case(container, session, case, jd_id=jd_id)
         elif case["kind"] == "diagnosis":
             _assert_diagnosis_case(container, session, case, jd_id=jd_id)
+        elif case["kind"] == "mock":
+            _assert_mock_case(container, session, case, jd_id=jd_id)
         else:
             raise AssertionError(f"Unsupported eval case kind: {case['kind']}")
 
@@ -129,6 +131,10 @@ def _seed_case(container: AppContainer, session, case: dict[str, Any]) -> str | 
         )
         assert result.records, f"{case['id']} did not ingest any question records"
 
+    mock_dimensions = [str(item) for item in seed.get("mock_questions", []) if str(item).strip()]
+    if mock_dimensions:
+        _seed_mock_question_bank(container, session, case_id=case["id"], dimensions=mock_dimensions)
+
     return jd_id
 
 
@@ -164,6 +170,106 @@ def _assert_rag_case(container: AppContainer, session, case: dict[str, Any], *, 
         "route": route,
         "metrics": metrics,
         "evidence": evidence,
+    }
+
+
+def _seed_mock_question_bank(container: AppContainer, session, *, case_id: str, dimensions: list[str]) -> None:
+    repo = container.repository
+    repo.ensure_user(session, USER_ID)
+    document = repo.create_document(
+        session,
+        user_id=USER_ID,
+        source_type="question",
+        filename=f"{case_id}_mock_questions.txt",
+        content_hash=f"{case_id}-mock-questions",
+        raw_text="mock eval question bank",
+        metadata_json={"source_scope": case_id},
+    )
+    for index, dimension in enumerate(dimensions, start=1):
+        chunk = repo.create_document_chunk(
+            session,
+            document_id=document.id,
+            user_id=USER_ID,
+            source_type="question",
+            chunk_index=index,
+            text=f"{dimension} eval chunk {index}",
+            metadata_json={"dimension": dimension},
+            vector_collection="eval",
+            vector_id=None,
+        )
+        question = repo.create_question(
+            session,
+            user_id=USER_ID,
+            document_id=document.id,
+            source_chunk_id=chunk.id,
+            text=f"{dimension} mock eval question {index}: explain mechanism, tradeoffs, and project evidence.",
+            source_company="EvalCorp",
+            source_role="Backend Intern",
+            dimension=dimension,
+            topics=[dimension],
+            reference_answer=f"Expected answer covers {dimension}, evidence, tradeoffs, and measurable outcome.",
+            normalized_text=f"{case_id}-{dimension}-{index}",
+            question_fingerprint=f"{case_id}-{dimension}-{index}",
+            source_scope=case_id,
+        )
+        repo.create_answer_record(
+            session,
+            question_id=question.id,
+            user_id=USER_ID,
+            user_answer="partial answer",
+            mastery_level="需要加强",
+            gaps=[f"{dimension} lacks evidence"],
+            next_probe=[f"probe {dimension}"],
+        )
+        repo.update_question_mastery(session, question_id=question.id, mastery_level="需要加强")
+
+
+def _assert_mock_case(container: AppContainer, session, case: dict[str, Any], *, jd_id: str | None) -> None:
+    from interview_agent.mock.service import SubmittedMockAnswer
+
+    request = dict(case.get("request") or {})
+    expected = case["expected"]
+    view = container.mock_interview.create_session(
+        session,
+        user_id=USER_ID,
+        mode=request.get("mode", "weakness_global"),
+        jd_id=jd_id if request.get("jd_id") == "$current" else request.get("jd_id"),
+        target_dimension=request.get("target_dimension"),
+        question_count=int(request.get("question_count") or 20),
+    )
+    actual_dimensions = [question.dimension for question in view.questions]
+    expected_mix = dict(expected.get("source_mix") or {})
+    expected_dimensions = set(expected.get("dimension_coverage") or [])
+    only_dimensions = set(expected.get("only_dimensions") or [])
+
+    metrics = {
+        "question_count": int(len(view.questions) == int(expected.get("question_count", 20))),
+        "dimension_coverage": int(expected_dimensions.issubset(set(actual_dimensions))),
+        "source_mix_accuracy": int(not expected_mix or view.source_mix == expected_mix),
+        "only_expected_dimensions": int(not only_dimensions or set(actual_dimensions).issubset(only_dimensions)),
+    }
+
+    if expected.get("answer_scoring_written"):
+        answered = container.mock_interview.submit_answers(
+            session,
+            user_id=USER_ID,
+            session_id=view.session_id,
+            answers=[
+                SubmittedMockAnswer(
+                    mock_question_id=question.mock_question_id,
+                    user_answer="I will answer with concept, evidence, tradeoff, and metric.",
+                )
+                for question in view.questions
+            ],
+        )
+        metrics["answer_scoring_written"] = int(all(question.answer is not None for question in answered.questions))
+
+    assert metrics == {key: 1 for key in metrics}, {
+        "case_id": case["id"],
+        "fixture": case["_path"],
+        "metrics": metrics,
+        "source_mix": view.source_mix,
+        "dimensions": actual_dimensions,
     }
 
 

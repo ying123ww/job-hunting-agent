@@ -22,6 +22,7 @@
           <el-menu-item index="/sources">Sources</el-menu-item>
           <el-menu-item index="/diagnosis">Diagnosis</el-menu-item>
           <el-menu-item index="/plan">Plan</el-menu-item>
+          <el-menu-item index="/mock">Mock</el-menu-item>
           <el-menu-item index="/chat">Chat</el-menu-item>
         </el-menu>
 

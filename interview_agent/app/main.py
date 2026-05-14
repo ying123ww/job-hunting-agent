@@ -25,6 +25,12 @@ from interview_agent.app.schemas import (
     IngestResponse,
     JDRecordResponse,
     JDIngestRequest,
+    MockAnswerResponse,
+    MockAnswersSubmitRequest,
+    MockQuestionResponse,
+    MockSessionCompleteRequest,
+    MockSessionCreateRequest,
+    MockSessionResponse,
     PlanGenerateRequest,
     PlanResponse,
     ProactiveTickRequest,
@@ -47,6 +53,7 @@ from interview_agent.app.schemas import (
 )
 from interview_agent.core.container import AppContainer
 from interview_agent.ingestion.parser import compose_jd_source_text, split_jd_sections
+from interview_agent.mock.service import SubmittedMockAnswer
 
 
 logging.basicConfig(level=logging.INFO)
@@ -194,6 +201,53 @@ def _resume_tailor_draft(container: AppContainer, session, *, user_id: str, jd) 
     )
 
 
+def _mock_answer_response(answer) -> MockAnswerResponse:
+    return MockAnswerResponse(
+        mock_answer_id=answer.mock_answer_id,
+        mock_question_id=answer.mock_question_id,
+        user_answer=answer.user_answer,
+        mastery_level=answer.mastery_level,
+        gaps=answer.gaps,
+        next_probe=answer.next_probe,
+        accuracy_score=answer.accuracy_score,
+        structure_score=answer.structure_score,
+        depth_score=answer.depth_score,
+        score_summary=answer.score_summary,
+        answered_at=answer.answered_at,
+    )
+
+
+def _mock_question_response(question) -> MockQuestionResponse:
+    return MockQuestionResponse(
+        mock_question_id=question.mock_question_id,
+        prompt=question.prompt,
+        reference_answer=question.reference_answer,
+        dimension=question.dimension,
+        topics=question.topics,
+        source_kind=question.source_kind,
+        source_question_id=question.source_question_id,
+        evidence=question.evidence,
+        position=question.position,
+        answer=_mock_answer_response(question.answer) if question.answer is not None else None,
+    )
+
+
+def _mock_session_response(view) -> MockSessionResponse:
+    return MockSessionResponse(
+        session_id=view.session_id,
+        mode=view.mode,
+        jd_id=view.jd_id,
+        target_dimension=view.target_dimension,
+        status=view.status,
+        question_count=view.question_count,
+        source_mix=view.source_mix,
+        summary=view.summary,
+        created_at=view.created_at,
+        completed_at=view.completed_at,
+        questions=[_mock_question_response(question) for question in view.questions],
+    )
+
+
 def _task_response(task) -> TaskResponse:
     return TaskResponse(
         task_id=task.task_id,
@@ -334,6 +388,7 @@ async def root() -> dict[str, object]:
             "plan_today": "/plan/today",
             "plan_sync_ticktick": "/plan/sync_ticktick",
             "resume_tailor_draft": "/resume/tailor-draft",
+            "mock_sessions": "/mock/sessions",
             "agent_turn": "/agent/turn",
             "agent_proactive_tick": "/agent/proactive/tick",
             "workspace_overview": "/workspace/overview",
@@ -619,6 +674,105 @@ async def current_gap(
             generated_at=_utcnow(),
             top_gaps=[_gap_response(gap) for gap in gaps],
         )
+
+
+@router.post("/mock/sessions", response_model=MockSessionResponse)
+async def create_mock_session(http_request: Request, request: MockSessionCreateRequest) -> MockSessionResponse:
+    container = _container(http_request)
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        resolved_jd_id = request.jd_id
+        if request.mode == "jd":
+            jd = _resolve_target_jd(session, container, user_id=user_id, requested_jd_id=request.jd_id)
+            if jd is None:
+                raise HTTPException(status_code=400, detail="Create or select a JD before starting a JD mock.")
+            resolved_jd_id = jd.id
+        if request.mode == "weakness_dimension" and not request.target_dimension:
+            raise HTTPException(status_code=400, detail="target_dimension is required for weakness_dimension mock.")
+        try:
+            view = container.mock_interview.create_session(
+                session,
+                user_id=user_id,
+                mode=request.mode,
+                jd_id=resolved_jd_id,
+                target_dimension=request.target_dimension,
+                question_count=request.question_count,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _mock_session_response(view)
+
+
+@router.get("/mock/sessions", response_model=list[MockSessionResponse])
+async def list_mock_sessions(
+    http_request: Request,
+    user_id: str | None = None,
+    limit: int = 20,
+) -> list[MockSessionResponse]:
+    container = _container(http_request)
+    resolved_user_id = _user_id(container, user_id)
+    with container.db.session_scope() as session:
+        views = container.mock_interview.list_sessions(session, user_id=resolved_user_id, limit=limit)
+        return [_mock_session_response(view) for view in views]
+
+
+@router.get("/mock/sessions/{session_id}", response_model=MockSessionResponse)
+async def get_mock_session(
+    http_request: Request,
+    session_id: str,
+    user_id: str | None = None,
+) -> MockSessionResponse:
+    container = _container(http_request)
+    resolved_user_id = _user_id(container, user_id)
+    with container.db.session_scope() as session:
+        try:
+            view = container.mock_interview.get_session(session, user_id=resolved_user_id, session_id=session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _mock_session_response(view)
+
+
+@router.post("/mock/sessions/{session_id}/answers", response_model=MockSessionResponse)
+async def submit_mock_answers(
+    http_request: Request,
+    session_id: str,
+    request: MockAnswersSubmitRequest,
+) -> MockSessionResponse:
+    container = _container(http_request)
+    user_id = _user_id(container, request.user_id)
+    with container.db.session_scope() as session:
+        try:
+            view = container.mock_interview.submit_answers(
+                session,
+                user_id=user_id,
+                session_id=session_id,
+                answers=[
+                    SubmittedMockAnswer(
+                        mock_question_id=answer.mock_question_id,
+                        user_answer=answer.user_answer,
+                    )
+                    for answer in request.answers
+                ],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _mock_session_response(view)
+
+
+@router.post("/mock/sessions/{session_id}/complete", response_model=MockSessionResponse)
+async def complete_mock_session(
+    http_request: Request,
+    session_id: str,
+    request: MockSessionCompleteRequest | None = None,
+) -> MockSessionResponse:
+    container = _container(http_request)
+    user_id = _user_id(container, request.user_id if request is not None else None)
+    with container.db.session_scope() as session:
+        try:
+            view = container.mock_interview.complete_session(session, user_id=user_id, session_id=session_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _mock_session_response(view)
 
 
 @router.post("/plan/generate", response_model=PlanResponse)

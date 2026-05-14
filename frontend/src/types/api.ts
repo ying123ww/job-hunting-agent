@@ -121,6 +121,68 @@ export interface GapAnalysisResponse {
   top_gaps: GapResponse[];
 }
 
+export type MockMode = "weakness_global" | "weakness_dimension" | "jd";
+export type MockSourceKind = "original" | "variant" | "generated";
+
+export interface MockAnswerResponse {
+  mock_answer_id: string;
+  mock_question_id: string;
+  user_answer: string;
+  mastery_level: string;
+  gaps: string[];
+  next_probe: string[];
+  accuracy_score: number | null;
+  structure_score: number | null;
+  depth_score: number | null;
+  score_summary: string | null;
+  answered_at: string;
+}
+
+export interface MockQuestionResponse {
+  mock_question_id: string;
+  prompt: string;
+  reference_answer: string;
+  dimension: string;
+  topics: string[];
+  source_kind: MockSourceKind;
+  source_question_id: string | null;
+  evidence: Record<string, unknown>[];
+  position: number;
+  answer: MockAnswerResponse | null;
+}
+
+export interface MockSessionResponse {
+  session_id: string;
+  mode: MockMode;
+  jd_id: string | null;
+  target_dimension: string | null;
+  status: string;
+  question_count: number;
+  source_mix: Record<string, number>;
+  summary: string;
+  created_at: string;
+  completed_at: string | null;
+  questions: MockQuestionResponse[];
+}
+
+export interface MockSessionCreatePayload {
+  user_id?: string;
+  mode: MockMode;
+  jd_id?: string | null;
+  target_dimension?: string | null;
+  question_count?: number;
+}
+
+export interface MockAnswerSubmitPayload {
+  mock_question_id: string;
+  user_answer: string;
+}
+
+export interface MockAnswersSubmitPayload {
+  user_id?: string;
+  answers: MockAnswerSubmitPayload[];
+}
+
 export interface SyncTickTickResponse {
   synced: number;
   mode: "dry_run" | "live";

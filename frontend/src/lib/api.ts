@@ -7,6 +7,9 @@ import type {
   IngestResponse,
   JDRecordResponse,
   JDIngestPayload,
+  MockAnswersSubmitPayload,
+  MockSessionCreatePayload,
+  MockSessionResponse,
   PlanResponse,
   QuestionEvaluateResponse,
   QuestionBankDetailResponse,
@@ -177,6 +180,24 @@ export const api = {
     request<SyncTickTickResponse>("/plan/sync_ticktick", {
       method: "POST",
       body: JSON.stringify({ plan_id: planId || null }),
+    }),
+
+  listMockSessions: () => request<MockSessionResponse[]>("/mock/sessions"),
+  getMockSession: (sessionId: string) => request<MockSessionResponse>(`/mock/sessions/${sessionId}`),
+  createMockSession: (payload: MockSessionCreatePayload) =>
+    request<MockSessionResponse>("/mock/sessions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  submitMockAnswers: (sessionId: string, payload: MockAnswersSubmitPayload) =>
+    request<MockSessionResponse>(`/mock/sessions/${sessionId}/answers`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  completeMockSession: (sessionId: string) =>
+    request<MockSessionResponse>(`/mock/sessions/${sessionId}/complete`, {
+      method: "POST",
+      body: JSON.stringify({}),
     }),
   agentTurn: (message: string, jdId?: string) =>
     request<AgentTurnResponse>("/agent/turn", {

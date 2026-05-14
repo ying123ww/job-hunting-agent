@@ -28,6 +28,7 @@ from interview_agent.ingestion.service import DocumentIngestionService, Question
 from interview_agent.memory2.memorizer import SemanticMemorizer
 from interview_agent.memory2.retriever import SemanticMemoryRetriever
 from interview_agent.memory2.store import SemanticMemoryStore
+from interview_agent.mock.service import MockInterviewService
 from interview_agent.planning.service import PlanService
 from interview_agent.resume.service import ResumeWorkspaceService
 from interview_agent.retrieval.service import RetrievalService
@@ -48,6 +49,7 @@ class AppContainer:
     retrieval: RetrievalService
     diagnosis: GapAnalysisService
     planning: PlanService
+    mock_interview: MockInterviewService
     resume_workspace: ResumeWorkspaceService
     ticktick: TickTickClient
     agent_event_bus: EventBus
@@ -93,6 +95,12 @@ class AppContainer:
             repository=repository,
             diagnosis=diagnosis,
             ticktick=ticktick,
+        )
+        mock_interview = MockInterviewService(
+            repository=repository,
+            retrieval=retrieval,
+            diagnosis=diagnosis,
+            question_ingestion=question_ingestion,
         )
         agent_event_bus = EventBus()
         lifecycle = TurnLifecycle(agent_event_bus)
@@ -163,6 +171,7 @@ class AppContainer:
             retrieval=retrieval,
             diagnosis=diagnosis,
             planning=planning,
+            mock_interview=mock_interview,
             resume_workspace=resume_workspace,
             ticktick=ticktick,
             agent_event_bus=agent_event_bus,

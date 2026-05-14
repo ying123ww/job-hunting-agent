@@ -4,6 +4,7 @@ import DashboardView from "./views/DashboardView.vue";
 import SourcesView from "./views/SourcesView.vue";
 import DiagnosisView from "./views/DiagnosisView.vue";
 import PlanView from "./views/PlanView.vue";
+import MockView from "./views/MockView.vue";
 import ChatView from "./views/ChatView.vue";
 
 export const router = createRouter({
@@ -14,6 +15,7 @@ export const router = createRouter({
     { path: "/sources", component: SourcesView },
     { path: "/diagnosis", component: DiagnosisView },
     { path: "/plan", component: PlanView },
+    { path: "/mock", component: MockView },
     { path: "/chat", component: ChatView },
   ],
 });

@@ -146,6 +146,56 @@ class AnswerRecord(Base):
     answered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class MockSession(Base):
+    __tablename__ = "mock_sessions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("mock"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    mode: Mapped[str] = mapped_column(String, index=True)
+    jd_id: Mapped[str | None] = mapped_column(ForeignKey("target_jds.id"), nullable=True, index=True)
+    target_dimension: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String, default="draft", index=True)
+    question_count: Mapped[int] = mapped_column(Integer, default=20)
+    source_mix: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MockQuestion(Base):
+    __tablename__ = "mock_questions"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("mq"))
+    session_id: Mapped[str] = mapped_column(ForeignKey("mock_sessions.id"), index=True)
+    question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), nullable=True, index=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    reference_answer: Mapped[str] = mapped_column(Text)
+    dimension: Mapped[str] = mapped_column(String, index=True)
+    topics: Mapped[list[str]] = mapped_column(JSON, default=list)
+    source_kind: Mapped[str] = mapped_column(String, index=True)
+    source_question_id: Mapped[str | None] = mapped_column(ForeignKey("questions.id"), nullable=True, index=True)
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    position: Mapped[int] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class MockAnswer(Base):
+    __tablename__ = "mock_answers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: make_id("ma"))
+    mock_question_id: Mapped[str] = mapped_column(ForeignKey("mock_questions.id"), index=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    user_answer: Mapped[str] = mapped_column(Text)
+    mastery_level: Mapped[str] = mapped_column(String)
+    gaps: Mapped[list[str]] = mapped_column(JSON, default=list)
+    next_probe: Mapped[list[str]] = mapped_column(JSON, default=list)
+    accuracy_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    structure_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    depth_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    score_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    answered_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class GapRecord(Base):
     __tablename__ = "gap_records"
 
